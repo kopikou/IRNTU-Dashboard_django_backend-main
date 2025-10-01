@@ -2,20 +2,23 @@
 Проект | Инструменты для обработки открытых данных студентов института ИТиАД
 
 ## Запуск проекта
-
+### Создание виртуального окружения: 
+```
+python3 -m venv env
+```
 ### Активация виртуального окружения:
 Windows:
 
 ```bash
-<Путь к проекту>\venv\Scripts\activate
+<Путь к проекту>\env\Scripts\activate.bat
 ```
 ```powershell
-<Путь к проекту>\venv\Scripts\Activate.ps1
+<Путь к проекту>\env\Scripts\Activate.ps1
 ```
 
 Linux:
 ```
-source <Путь к проекту>/venv/bin/activate
+source <Путь к проекту>/env/bin/activate
 ```
 ### Обновление миграций:
 ```
