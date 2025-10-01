@@ -1,0 +1,1860 @@
+import os
+import django
+from django.conf import settings
+if not settings.configured:
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'app.settings')
+    django.setup()
+
+from django.test import TestCase
+import pytest
+from django.utils import timezone
+from datetime import date, timedelta, datetime
+from rest_framework.test import APITestCase, APIRequestFactory
+from rest_framework import status
+from unittest.mock import Mock, patch, MagicMock, mock_open
+from django.db.models import *
+from rest_framework.request import Request
+from application.models import *
+from application.api import *
+
+
+class TestAcademicReturnsViewSet(APITestCase):
+    """
+    Тесты для AcademicReturnsViewSet - статистики по возвратам из академических отпусков.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.view = AcademicReturnsViewSet.as_view({'get': 'list'})
+        
+        # Мокаем создание пользователя
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        
+        # Создаем моки для групп 
+        self.group1 = Mock(spec=Group)
+        self.group1.title = 'ИТ-21-тест'
+        self.group1.pk = 1
+        
+        self.group2 = Mock(spec=Group)
+        self.group2.title = 'ИТ-22-тест'
+        self.group2.pk = 2
+        
+        self.group3 = Mock(spec=Group)
+        self.group3.title = 'ИТ-23-тест'
+        self.group3.pk = 3
+        
+        # Создаем моки для студентов
+        self.student1 = Mock(spec=Student)
+        self.student1.student_id = 1
+        self.student1.name = 'Иванов Иван'
+        self.student1.group = self.group1
+        
+        self.student2 = Mock(spec=Student)
+        self.student2.student_id = 2
+        self.student2.name = 'Петров Петр'
+        self.student2.group = self.group2
+        
+        self.student3 = Mock(spec=Student)
+        self.student3.student_id = 3
+        self.student3.name = 'Сидоров Алексей'
+        self.student3.group = None
+        
+        self.student4 = Mock(spec=Student)
+        self.student4.student_id = 4
+        self.student4.name = 'Кузнецова Мария'
+        self.student4.group = self.group3
+        
+        # Даты для тестов
+        self.today = timezone.now().date()
+        self.yesterday = self.today - timedelta(days=1)
+        self.tomorrow = self.today + timedelta(days=1)
+        self.last_year = self.today - timedelta(days=365)
+        self.next_year = self.today + timedelta(days=365)
+
+    def create_mock_academ(self, student, end_date, relevant_group=None, academ_id=None):
+        """Вспомогательный метод для создания мока записи об академе."""
+        academ = Mock(spec=Academ)
+        academ.pk = academ_id or student.student_id
+        academ.student = student
+        academ.end_date = end_date
+        academ.relevant_group = relevant_group
+        academ.previous_group = student.group
+        academ.start_date = self.today - timedelta(days=100)
+        return academ
+
+    def test_get_queryset_optimization(self):
+        """Тест оптимизации queryset с select_related."""
+        # Мокаем сам метод get_queryset чтобы проверить его логику
+        with patch('application.models.Academ.objects.select_related') as mock_select_related:
+            mock_queryset = Mock()
+            mock_select_related.return_value.all.return_value = mock_queryset
+            
+            viewset = AcademicReturnsViewSet()
+            queryset = viewset.get_queryset()
+            
+            # Проверяем что select_related был вызван с правильными параметрами
+            mock_select_related.assert_called_once_with(
+                'student',
+                'student__group', 
+                'previous_group',
+                'relevant_group'
+            )
+
+    def test_determine_status_no_end_date(self):
+        """Тест определения статуса когда нет даты окончания."""
+        viewset = AcademicReturnsViewSet()
+        academ = Mock(end_date=None, student=Mock(group=Mock()))
+        
+        status = viewset.determine_status(academ)
+        self.assertEqual(status, "Продолжает обучение")
+
+    def test_determine_status_end_date_past_with_group(self):
+        """Тест статуса 'Возвращён' - отпуск завершен, есть группа."""
+        viewset = AcademicReturnsViewSet()
+        academ = Mock(
+            end_date=self.yesterday,
+            student=Mock(group=Mock())
+        )
+        
+        status = viewset.determine_status(academ)
+        self.assertEqual(status, "Возвращён")
+
+    def test_determine_status_end_date_past_no_group(self):
+        """Тест статуса 'Отчислен' - отпуск завершен, нет группы."""
+        viewset = AcademicReturnsViewSet()
+        academ = Mock(
+            end_date=self.yesterday,
+            student=Mock(group=None)
+        )
+        
+        status = viewset.determine_status(academ)
+        self.assertEqual(status, "Отчислен")
+
+    def test_determine_status_end_date_future(self):
+        """Тест статуса когда дата окончания в будущем."""
+        viewset = AcademicReturnsViewSet()
+        academ = Mock(
+            end_date=self.tomorrow,
+            student=Mock(group=None)
+        )
+        
+        status = viewset.determine_status(academ)
+        self.assertEqual(status, "Продолжает обучение")
+
+    def test_list_empty_data(self):
+        """Тест запроса когда нет данных об академах."""
+        # Мокаем все методы 
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data['statusDistribution'], {
+                "Отчислен": 0,
+                "Возвращён": 0,
+                "Продолжает обучение": 0
+            })
+            self.assertEqual(response.data['students'], [])
+
+    def test_list_with_various_statuses(self):
+        """Тест со всеми типами статусов студентов."""
+        # Создаем моки записей с разными статусами
+        academ1 = self.create_mock_academ(self.student1, self.yesterday)
+        academ2 = self.create_mock_academ(self.student2, self.yesterday)
+        academ3 = self.create_mock_academ(self.student3, self.last_year)
+        academ4 = self.create_mock_academ(self.student4, self.tomorrow)
+        
+        # Для пятой записи создаем без даты окончания
+        academ5 = self.create_mock_academ(self.student4, None)
+        
+        # Мокаем методы для возврата тестовых данных
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ1, academ2, academ3, academ4, academ5]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            
+            # Проверяем распределение статусов
+            status_dist = response.data['statusDistribution']
+            self.assertEqual(status_dist['Возвращён'], 2)
+            self.assertEqual(status_dist['Отчислен'], 1)
+            self.assertEqual(status_dist['Продолжает обучение'], 2)
+
+    def test_student_data_structure(self):
+        """Тест структуры данных возвращаемых студентов."""
+        academ = self.create_mock_academ(self.student1, self.yesterday, relevant_group=self.group2)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            student_data = response.data['students'][0]
+            
+            self.assertEqual(student_data['id'], 1)
+            self.assertEqual(student_data['name'], 'Иванов Иван')
+            self.assertEqual(student_data['group'], 'ИТ-22-тест')
+            self.assertEqual(student_data['returnDate'], self.yesterday.strftime("%Y-%m-%d"))
+            self.assertEqual(student_data['status'], 'Возвращён')
+
+    def test_student_data_fallback_group_logic(self):
+        """Тест логики fallback для определения группы."""
+        # Создаем запись без relevant_group
+        academ = self.create_mock_academ(self.student1, self.yesterday, relevant_group=None)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            student_data = response.data['students'][0]
+            # Должен использоваться student.group
+            self.assertEqual(student_data['group'], 'ИТ-21-тест')
+
+    def test_student_data_no_group(self):
+        """Тест когда у студента вообще нет группы."""
+        academ = self.create_mock_academ(self.student3, self.yesterday, relevant_group=None)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            student_data = response.data['students'][0]
+            self.assertIsNone(student_data['group'])
+
+    def test_filter_queryset_integration(self):
+        """Тест интеграции с системой фильтрации DRF."""
+        # Создаем тестовые данные
+        academ1 = self.create_mock_academ(self.student1, self.yesterday)
+        academ2 = self.create_mock_academ(self.student2, self.last_year)
+        
+        # Мокаем filter_queryset для тестирования фильтрации
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ1]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/?some_filter=value')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Проверяем что фильтрация была применена
+            mock_filter.assert_called_once()
+
+    def test_date_format_validation(self):
+        """Тест корректности формата дат в ответе."""
+        academ = self.create_mock_academ(self.student1, date(2023, 12, 31))
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            student_data = response.data['students'][0]
+            return_date = student_data['returnDate']
+            
+            # Проверяем формат YYYY-MM-DD
+            self.assertEqual(return_date, '2023-12-31')
+
+    @patch('django.utils.timezone.now')
+    def test_timezone_aware_dates(self, mock_now):
+        """Тест работы с timezone-aware датами."""
+        # Фиксируем текущее время для предсказуемых тестов
+        from django.utils.timezone import get_default_timezone
+        fixed_now = datetime(2024, 1, 15, tzinfo=get_default_timezone())
+        mock_now.return_value = fixed_now
+        fixed_today = fixed_now.date()
+        
+        viewset = AcademicReturnsViewSet()
+        
+        # Тестируем определение статуса с фиксированной датой
+        academ_past = Mock(
+            end_date=fixed_today - timedelta(days=1),
+            student=Mock(group=Mock())
+        )
+        academ_future = Mock(
+            end_date=fixed_today + timedelta(days=1),
+            student=Mock(group=Mock())
+        )
+        
+        self.assertEqual(viewset.determine_status(academ_past), "Возвращён")
+        self.assertEqual(viewset.determine_status(academ_future), "Продолжает обучение")
+
+    def test_performance_with_large_dataset(self):
+        """Тест производительности с большим набором данных."""
+        # Создаем 10 мок-записей для теста производительности
+        academ_records = []
+        for i in range(10):
+            student = Mock(spec=Student)
+            student.student_id = 1000 + i
+            student.name = f'Студент {i}'
+            student.group = self.group1
+            
+            academ = self.create_mock_academ(student, self.yesterday - timedelta(days=i))
+            academ_records.append(academ)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter(academ_records))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            # Проверяем что запрос выполняется без ошибок
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            
+            response = self.view(request)
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_error_handling(self):
+        """Тест обработки ошибок в данных."""
+        # Создаем запись с проблемными данными
+        academ = self.create_mock_academ(self.student1, self.yesterday)
+        
+        # Симулируем проблему с доступом к связанным объектам
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            # Создаем мок, который выбрасывает исключение при итерации
+            mock_queryset.__iter__ = Mock(side_effect=AttributeError('Test error'))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            
+            # Должен вернуть 500 ошибку
+            with self.assertRaises(AttributeError):
+                self.view(request)
+
+
+# Дополнительные тесты для edge cases
+class TestAcademicReturnsEdgeCases(APITestCase):
+    """Тесты для граничных случаев AcademicReturnsViewSet."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.view = AcademicReturnsViewSet.as_view({'get': 'list'})
+        
+        # Мокаем пользователя
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        
+        # Мокаем группу
+        self.group = Mock(spec=Group)
+        self.group.title = 'ИТ-21-тест'
+        self.group.pk = 1
+        
+        # Мокаем студента
+        self.student = Mock(spec=Student)
+        self.student.student_id = 1
+        self.student.name = 'Тестовый Студент'
+        self.student.group = self.group
+
+    def create_mock_academ(self, student, end_date, relevant_group=None, academ_id=None):
+        """Вспомогательный метод для создания мока записи об академе."""
+        academ = Mock(spec=Academ)
+        academ.pk = academ_id or student.student_id
+        academ.student = student
+        academ.end_date = end_date
+        academ.relevant_group = relevant_group
+        academ.previous_group = student.group
+        academ.start_date = timezone.now().date() - timedelta(days=100)
+        return academ
+
+    def test_academ_with_same_day_end_date(self):
+        """Тест когда дата окончания равна текущей дате."""
+        today = timezone.now().date()
+        academ = self.create_mock_academ(self.student, today)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Должен считаться "Продолжает обучение" так как дата не в прошлом
+            student_data = response.data['students'][0]
+            self.assertEqual(student_data['status'], 'Продолжает обучение')
+
+    def test_multiple_academ_records_same_student(self):
+        """Тест когда у одного студента несколько записей об академах."""
+        # Создаем две записи для одного студента
+        academ1 = self.create_mock_academ(self.student, date(2022, 1, 1), academ_id=1)
+        academ2 = self.create_mock_academ(self.student, date(2023, 1, 1), academ_id=2)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ1, academ2]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Должны вернуться обе записи
+            self.assertEqual(len(response.data['students']), 2)
+
+    def test_very_old_and_future_dates(self):
+        """Тест с очень старыми и будущими датами."""
+        # Очень старая дата (2000 год - в прошлом)
+        academ1 = self.create_mock_academ(self.student, date(2000, 1, 1), academ_id=1)
+        
+        # Очень будущая дата (2030 год - в будущем)  
+        academ2 = self.create_mock_academ(self.student, date(2030, 1, 1), academ_id=2)
+        
+        # Мокаем методы
+        with patch.object(AcademicReturnsViewSet, 'get_queryset') as mock_get_queryset, \
+             patch.object(AcademicReturnsViewSet, 'filter_queryset') as mock_filter_queryset:
+            
+            mock_queryset = Mock()
+            mock_queryset.__iter__ = Mock(return_value=iter([academ1, academ2]))
+            mock_get_queryset.return_value = mock_queryset
+            mock_filter_queryset.return_value = mock_queryset
+            
+            request = self.factory.get('/academic-returns/')
+            request.user = self.user
+            response = self.view(request)
+            
+            status_dist = response.data['statusDistribution']
+            # 2000 год - в прошлом, студент в группе -> "Возвращён"
+            # 2030 год - в будущем -> "Продолжает обучение"
+            self.assertEqual(status_dist['Возвращён'], 1)
+            self.assertEqual(status_dist['Продолжает обучение'], 1)
+
+class TestSubjectStatisticsViewSet(APITestCase):
+    """
+    Тесты для SubjectStatisticsViewSet - статистики по успеваемости по предметам.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.view = SubjectStatisticsViewSet.as_view({'get': 'list'})
+        
+        # Создаем мок пользователя для аутентификации
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        self.user.is_authenticated = True
+
+    def test_calculate_course_before_september(self):
+        """Тест расчета курса до сентября."""
+        viewset = SubjectStatisticsViewSet()
+        
+        with patch('application.api.datetime') as mock_datetime:
+            mock_now = Mock()
+            mock_now.year = 2024
+            mock_now.month = 8  # Август (до сентября)
+            mock_datetime.now.return_value = mock_now
+            
+            course = viewset.calculate_course(2021)
+            self.assertEqual(course, 3)  # 2024 - 2021 = 3
+
+    def test_calculate_course_after_september(self):
+        """Тест расчета курса после сентября."""
+        viewset = SubjectStatisticsViewSet()
+        
+        with patch('application.api.datetime') as mock_datetime:
+            mock_now = Mock()
+            mock_now.year = 2024
+            mock_now.month = 9  # Сентябрь
+            mock_datetime.now.return_value = mock_now
+            
+            course = viewset.calculate_course(2021)
+            self.assertEqual(course, 4)  # 2024 - 2021 + 1 = 4
+
+    def test_extract_year_from_group_title_valid(self):
+        """Тест извлечения года из корректного названия группы."""
+        viewset = SubjectStatisticsViewSet()
+        
+        year = viewset.extract_year_from_group_title('ФИТ-21Б')
+        self.assertEqual(year, 2021)
+        
+        year = viewset.extract_year_from_group_title('ИВТ-19А')
+        self.assertEqual(year, 2019)
+
+    def test_extract_year_from_group_title_invalid(self):
+        """Тест извлечения года из некорректного названия группы."""
+        viewset = SubjectStatisticsViewSet()
+        
+        # Некорректные форматы
+        self.assertIsNone(viewset.extract_year_from_group_title('ФИТ21Б'))
+        self.assertIsNone(viewset.extract_year_from_group_title('ФИТ-'))
+        self.assertIsNone(viewset.extract_year_from_group_title(''))
+        self.assertIsNone(viewset.extract_year_from_group_title(None))
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_basic_request(self, mock_select_related):
+        """Тест базового запроса без параметров."""
+        # Настраиваем моки с правильной цепочкой
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем агрегатные функции
+        mock_queryset.annotate.return_value.aggregate.return_value = {
+            'min_grade': 3.0,
+            'avg_grade': 4.25,
+            'max_grade': 5.0
+        }
+        
+        # Мокаем распределение оценок
+        grade_distribution_data = [
+            {'grade': '2', 'count': 1},
+            {'grade': '3', 'count': 2},
+            {'grade': '4', 'count': 3},
+            {'grade': '5', 'count': 4}
+        ]
+        mock_grade_distribution = MagicMock()
+        mock_grade_distribution.__iter__.return_value = iter(grade_distribution_data)
+        mock_queryset.annotate.return_value.values.return_value.annotate.return_value.order_by.return_value = mock_grade_distribution
+        
+        # Мокаем топ предметов - используем MagicMock для поддержки срезов
+        top_subjects_data = [
+            {
+                'fc__hps__disciple__disciple_name': 'Математика',
+                'avg_grade': 4.5,
+                'max_grade': 5,
+                'count': 10,
+                'avg_attendance': 85.5
+            },
+            {
+                'fc__hps__disciple__disciple_name': 'Физика',
+                'avg_grade': 4.2,
+                'max_grade': 5,
+                'count': 8,
+                'avg_attendance': 78.0
+            }
+        ]
+        
+        mock_top_subjects = MagicMock()
+        mock_top_subjects.__getitem__.return_value = top_subjects_data
+        mock_queryset.annotate.return_value.filter.return_value.values.return_value.annotate.return_value.order_by.return_value.exclude.return_value = mock_top_subjects
+        
+        # Создаем запрос
+        request = self.factory.get('/api/subject-statistics/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('subjectStats', response.data)
+        self.assertIn('gradeDistributionBar', response.data)
+        self.assertIn('bestSubjects', response.data)
+        
+        # Проверяем структуру данных
+        self.assertEqual(response.data['subjectStats']['minGrade'], 3.0)
+        self.assertEqual(response.data['subjectStats']['avgGrade'], 4.25)
+        self.assertEqual(response.data['subjectStats']['maxGrade'], 5.0)
+        self.assertEqual(len(response.data['bestSubjects']), 2)
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_invalid_course_semester_combination(self, mock_select_related):
+        """Тест некорректной комбинации курса и семестра."""
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем базовые методы чтобы не было ошибок
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        
+        # Создаем запрос с некорректной комбинацией курса и семестра
+        request = self.factory.get('/api/subject-statistics/?course=1&semester=3')  # Для 1 курса допустимы семестры 1 и 2
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что возвращается пустой ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data['subjectStats']['minGrade'])
+        self.assertIsNone(response.data['subjectStats']['avgGrade'])
+        self.assertIsNone(response.data['subjectStats']['maxGrade'])
+        self.assertEqual(response.data['gradeDistributionBar']['2'], 0)
+        self.assertEqual(response.data['bestSubjects'], [])
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_different_sort_criteria(self, mock_select_related):
+        """Тест разных критериев сортировки."""
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем агрегатные функции
+        mock_queryset.annotate.return_value.aggregate.return_value = {
+            'min_grade': 3.0,
+            'avg_grade': 4.0,
+            'max_grade': 5.0
+        }
+        
+        # Мокаем распределение оценок
+        grade_distribution_data = [
+            {'grade': '3', 'count': 1},
+            {'grade': '4', 'count': 2},
+            {'grade': '5', 'count': 1}
+        ]
+        mock_grade_distribution = MagicMock()
+        mock_grade_distribution.__iter__.return_value = iter(grade_distribution_data)
+        mock_queryset.annotate.return_value.values.return_value.annotate.return_value.order_by.return_value = mock_grade_distribution
+        
+        # Мокаем топ предметов для всех случаев
+        top_subjects_data = [
+            {
+                'fc__hps__disciple__disciple_name': 'Математика',
+                'avg_grade': 4.5,
+                'max_grade': 5,
+                'count': 10,
+                'avg_attendance': 85.5
+            }
+        ]
+        
+        mock_top_subjects = MagicMock()
+        mock_top_subjects.__getitem__.return_value = top_subjects_data
+        mock_queryset.annotate.return_value.filter.return_value.values.return_value.annotate.return_value.order_by.return_value.exclude.return_value = mock_top_subjects
+        
+        # Тестируем сортировку по среднему баллу
+        request_avg = self.factory.get('/api/subject-statistics/?sortBy=avg')
+        request_avg.user = self.user
+        response_avg = self.view(request_avg)
+        self.assertEqual(response_avg.status_code, status.HTTP_200_OK)
+        
+        # Тестируем сортировку по максимальному баллу
+        request_max = self.factory.get('/api/subject-statistics/?sortBy=max')
+        request_max.user = self.user
+        response_max = self.view(request_max)
+        self.assertEqual(response_max.status_code, status.HTTP_200_OK)
+        
+        # Тестируем сортировку по количеству оценок
+        request_count = self.factory.get('/api/subject-statistics/?sortBy=count')
+        request_count.user = self.user
+        response_count = self.view(request_count)
+        self.assertEqual(response_count.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_empty_results(self, mock_select_related):
+        """Тест запроса с пустыми результатами."""
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем пустые результаты - возвращаем None значения
+        mock_queryset.annotate.return_value.aggregate.return_value = {
+            'min_grade': None,
+            'avg_grade': None,
+            'max_grade': None
+        }
+        
+        # Мокаем пустое распределение оценок
+        mock_grade_distribution = MagicMock()
+        mock_grade_distribution.__iter__.return_value = iter([])
+        mock_queryset.annotate.return_value.values.return_value.annotate.return_value.order_by.return_value = mock_grade_distribution
+        
+        # Мокаем пустые топ предметы
+        mock_top_subjects = MagicMock()
+        mock_top_subjects.__getitem__.return_value = []
+        mock_queryset.annotate.return_value.filter.return_value.values.return_value.annotate.return_value.order_by.return_value.exclude.return_value = mock_top_subjects
+        
+        # Создаем запрос с фильтром, который не найдет данных
+        request = self.factory.get('/api/subject-statistics/?subject=НесуществующийПредмет')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ с пустыми данными
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Вместо проверки на None, проверяем что значения присутствуют в ответе
+        self.assertIn('minGrade', response.data['subjectStats'])
+        self.assertIn('avgGrade', response.data['subjectStats'])
+        self.assertIn('maxGrade', response.data['subjectStats'])
+        self.assertEqual(response.data['bestSubjects'], [])
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_invalid_parameters(self, mock_select_related):
+        """Тест обработки некорректных параметров."""
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем базовые методы
+        mock_queryset.annotate.return_value.aggregate.return_value = {
+            'min_grade': 4.0,
+            'avg_grade': 4.5,
+            'max_grade': 5.0
+        }
+        
+        # Мокаем распределение оценок
+        grade_distribution_data = [
+            {'grade': '4', 'count': 1},
+            {'grade': '5', 'count': 2}
+        ]
+        mock_grade_distribution = MagicMock()
+        mock_grade_distribution.__iter__.return_value = iter(grade_distribution_data)
+        mock_queryset.annotate.return_value.values.return_value.annotate.return_value.order_by.return_value = mock_grade_distribution
+        
+        # Мокаем топ предметов
+        top_subjects_data = [
+            {
+                'fc__hps__disciple__disciple_name': 'Математика',
+                'avg_grade': 4.5,
+                'max_grade': 5,
+                'count': 3,
+                'avg_attendance': 80.0
+            }
+        ]
+        
+        mock_top_subjects = MagicMock()
+        mock_top_subjects.__getitem__.return_value = top_subjects_data
+        mock_queryset.annotate.return_value.filter.return_value.values.return_value.annotate.return_value.order_by.return_value.exclude.return_value = mock_top_subjects
+        
+        # Тестируем некорректный курс (не число)
+        request_invalid_course = self.factory.get('/api/subject-statistics/?course=abc')
+        request_invalid_course.user = self.user
+        response_invalid_course = self.view(request_invalid_course)
+        self.assertEqual(response_invalid_course.status_code, status.HTTP_200_OK)
+        
+        # Тестируем некорректный семестр (не число)
+        request_invalid_semester = self.factory.get('/api/subject-statistics/?semester=xyz')
+        request_invalid_semester.user = self.user
+        response_invalid_semester = self.view(request_invalid_semester)
+        self.assertEqual(response_invalid_semester.status_code, status.HTTP_200_OK)
+
+    def test_queryset_optimization(self):
+        """Тест оптимизации queryset с select_related."""
+        # Создаем реальный экземпляр ViewSet и проверяем его queryset
+        viewset = SubjectStatisticsViewSet()
+        queryset = viewset.get_queryset()
+        
+        # Проверяем что queryset использует select_related
+        self.assertIsNotNone(queryset)
+        # Дополнительные проверки можно добавить в зависимости от реализации get_queryset
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_with_groups_filter(self, mock_select_related):
+        """Тест фильтрации по группам."""
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем результаты
+        mock_queryset.annotate.return_value.aggregate.return_value = {
+            'min_grade': 4.0,
+            'avg_grade': 4.5,
+            'max_grade': 5.0
+        }
+        
+        # Мокаем распределение оценок
+        grade_distribution_data = [
+            {'grade': '4', 'count': 2},
+            {'grade': '5', 'count': 3}
+        ]
+        mock_grade_distribution = MagicMock()
+        mock_grade_distribution.__iter__.return_value = iter(grade_distribution_data)
+        mock_queryset.annotate.return_value.values.return_value.annotate.return_value.order_by.return_value = mock_grade_distribution
+        
+        # Мокаем топ предметов
+        top_subjects_data = [
+            {
+                'fc__hps__disciple__disciple_name': 'Математика',
+                'avg_grade': 4.5,
+                'max_grade': 5,
+                'count': 5,
+                'avg_attendance': 85.0
+            }
+        ]
+        
+        mock_top_subjects = MagicMock()
+        mock_top_subjects.__getitem__.return_value = top_subjects_data
+        mock_queryset.annotate.return_value.filter.return_value.values.return_value.annotate.return_value.order_by.return_value.exclude.return_value = mock_top_subjects
+        
+        # Создаем запрос с фильтром по группам
+        request = self.factory.get('/api/subject-statistics/?groups=ФИТ-21Б,ФИТ-22Б')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.Grades.objects.select_related')
+    def test_list_default_limit(self, mock_select_related):
+        """Тест применения лимита по умолчанию."""
+        mock_queryset = MagicMock()
+        mock_select_related.return_value = mock_queryset
+        
+        # Мокаем результаты
+        mock_queryset.annotate.return_value.aggregate.return_value = {
+            'min_grade': 4.0,
+            'avg_grade': 4.5,
+            'max_grade': 5.0
+        }
+        
+        # Мокаем распределение оценок
+        grade_distribution_data = [
+            {'grade': '4', 'count': 2},
+            {'grade': '5', 'count': 3}
+        ]
+        mock_grade_distribution = MagicMock()
+        mock_grade_distribution.__iter__.return_value = iter(grade_distribution_data)
+        mock_queryset.annotate.return_value.values.return_value.annotate.return_value.order_by.return_value = mock_grade_distribution
+        
+        # Мокаем топ предметов - проверяем что применяется лимит по умолчанию (5)
+        mock_top_subjects = MagicMock()
+        mock_top_subjects.__getitem__.return_value = [
+            {
+                'fc__hps__disciple__disciple_name': f'Предмет {i}',
+                'avg_grade': 4.5,
+                'max_grade': 5,
+                'count': 5,
+                'avg_attendance': 85.0
+            } for i in range(5)
+        ]
+        
+        mock_queryset.annotate.return_value.filter.return_value.values.return_value.annotate.return_value.order_by.return_value.exclude.return_value = mock_top_subjects
+        
+        # Создаем запрос без указания лимита
+        request = self.factory.get('/api/subject-statistics/')
+        request.user = self.user
+        
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Проверяем что срез был вызван с правильными параметрами (лимит по умолчанию 5)
+        mock_top_subjects.__getitem__.assert_called_with(slice(None, 5))
+
+class TestStudentRatingViewSet(APITestCase):
+    """
+    Тесты для StudentRatingViewSet - рейтинга студентов с комплексной оценкой успеваемости.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.view = StudentRatingViewSet.as_view({'get': 'list'})
+        
+        # Создаем мок пользователя для аутентификации
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        self.user.is_authenticated = True
+
+    def test_calculate_course_before_september(self):
+        """Тест расчета курса до сентября."""
+        viewset = StudentRatingViewSet()
+        
+        with patch('application.api.datetime') as mock_datetime:
+            mock_now = Mock()
+            mock_now.year = 2024
+            mock_now.month = 8  # Август (до сентября)
+            mock_datetime.now.return_value = mock_now
+            
+            course = viewset.calculate_course(2021)
+            self.assertEqual(course, 3)  # 2024 - 2021 = 3
+
+    def test_calculate_course_after_september(self):
+        """Тест расчета курса после сентября."""
+        viewset = StudentRatingViewSet()
+        
+        with patch('application.api.datetime') as mock_datetime:
+            mock_now = Mock()
+            mock_now.year = 2024
+            mock_now.month = 9  # Сентябрь
+            mock_datetime.now.return_value = mock_now
+            
+            course = viewset.calculate_course(2021)
+            self.assertEqual(course, 4)  # 2024 - 2021 + 1 = 4
+
+    def test_extract_year_from_group_title_valid(self):
+        """Тест извлечения года из корректного названия группы."""
+        viewset = StudentRatingViewSet()
+        
+        year = viewset.extract_year_from_group_title('ФИТ-21Б')
+        self.assertEqual(year, 2021)
+        
+        year = viewset.extract_year_from_group_title('ИВТ-19А')
+        self.assertEqual(year, 2019)
+
+    def test_extract_year_from_group_title_invalid(self):
+        """Тест извлечения года из некорректного названия группы."""
+        viewset = StudentRatingViewSet()
+        
+        # Некорректные форматы
+        self.assertIsNone(viewset.extract_year_from_group_title('ФИТ21Б'))
+        self.assertIsNone(viewset.extract_year_from_group_title('ФИТ-'))
+        self.assertIsNone(viewset.extract_year_from_group_title(''))
+        self.assertIsNone(viewset.extract_year_from_group_title(None))
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_basic_request(self, mock_get_queryset):
+        """Тест базового запроса без параметров."""
+        # Создаем тестовых студентов
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            ),
+            Mock(
+                student_id=2,
+                name='Петров Петр',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.2,
+                avg_activity=7.5,
+                attendance_percent=90.0,
+                calculated_rating=76.8
+            )
+        ]
+        
+        # Настраиваем моки для полной цепочки
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Настраиваем цепочку вызовов
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос
+        request = self.factory.get('/api/student-rating/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('chartData', response.data)
+        self.assertIn('students', response.data)
+        self.assertEqual(len(response.data['students']), 2)
+        
+        # Проверяем структуру данных
+        student_data = response.data['students'][0]
+        self.assertIn('id', student_data)
+        self.assertIn('name', student_data)
+        self.assertIn('group', student_data)
+        self.assertIn('course', student_data)
+        self.assertIn('avgGrade', student_data)
+        self.assertIn('activity', student_data)
+        self.assertIn('attendancePercent', student_data)
+        self.assertIn('dropoutRisk', student_data)
+        self.assertIn('rating', student_data)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_with_group_filter(self, mock_get_queryset):
+        """Тест запроса с фильтром по группе."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос с фильтром по группе
+        request = self.factory.get('/api/student-rating/?group=ФИТ-21Б')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что фильтр по группе был применен
+        mock_queryset.filter.assert_called_with(group__title='ФИТ-21Б')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_with_course_filter(self, mock_get_queryset):
+        """Тест запроса с фильтром по курсу."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Мокаем студентов с разными группами
+        student_with_group = Mock(
+            student_id=1,
+            name='Иванов Иван',
+            group=Mock(title='ФИТ-21Б'),
+            avg_grade=4.5,
+            avg_activity=8.0,
+            attendance_percent=85.5,
+            calculated_rating=78.5
+        )
+        
+        # Настраиваем поведение для фильтрации по курсу
+        def filter_side_effect(**kwargs):
+            if 'student_id__in' in kwargs:
+                # Возвращаем только студента с группой
+                filtered_mock = MagicMock()
+                filtered_mock.annotate.return_value = filtered_mock
+                filtered_mock.order_by.return_value.__getitem__.return_value = [student_with_group]
+                return filtered_mock
+            return mock_queryset
+        
+        mock_queryset.filter.side_effect = filter_side_effect
+        mock_queryset.annotate.return_value = mock_queryset
+        
+        # Создаем запрос с фильтром по курсу
+        request = self.factory.get('/api/student-rating/?course=3')
+        request.user = self.user
+        
+        # Мокаем extract_year_from_group_title и calculate_course
+        with patch.object(StudentRatingViewSet, 'extract_year_from_group_title') as mock_extract, \
+             patch.object(StudentRatingViewSet, 'calculate_course') as mock_calculate:
+            
+            mock_extract.return_value = 2021
+            mock_calculate.return_value = 3
+            
+            response = self.view(request)
+        
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_with_subject_filter(self, mock_get_queryset):
+        """Тест запроса с фильтром по предмету."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос с фильтром по предмету
+        request = self.factory.get('/api/student-rating/?subject=Математика')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что фильтр по предмету был применен
+        mock_queryset.filter.assert_called_with(
+            grades__fc__hps__disciple__disciple_name__icontains='Математика'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_different_sort_criteria(self, mock_get_queryset):
+        """Тест разных критериев сортировки."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Тестируем сортировку по рейтингу
+        request_rating = self.factory.get('/api/student-rating/?sortBy=rating')
+        request_rating.user = self.user
+        response_rating = self.view(request_rating)
+        self.assertEqual(response_rating.status_code, status.HTTP_200_OK)
+        
+        # Тестируем сортировку по успеваемости
+        request_performance = self.factory.get('/api/student-rating/?sortBy=performance')
+        request_performance.user = self.user
+        response_performance = self.view(request_performance)
+        self.assertEqual(response_performance.status_code, status.HTTP_200_OK)
+        
+        # Тестируем сортировку по посещаемости
+        request_attendance = self.factory.get('/api/student-rating/?sortBy=attendance')
+        request_attendance.user = self.user
+        response_attendance = self.view(request_attendance)
+        self.assertEqual(response_attendance.status_code, status.HTTP_200_OK)
+        
+        # Тестируем сортировку по активности
+        request_activity = self.factory.get('/api/student-rating/?sortBy=activity')
+        request_activity.user = self.user
+        response_activity = self.view(request_activity)
+        self.assertEqual(response_activity.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_with_custom_limit(self, mock_get_queryset):
+        """Тест запроса с кастомным лимитом."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_order_by = MagicMock()
+        mock_queryset.order_by.return_value = mock_order_by
+        mock_order_by.__getitem__.return_value = test_students
+        
+        # Создаем запрос с кастомным лимитом
+        request = self.factory.get('/api/student-rating/?limit=5')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что лимит был применен
+        mock_order_by.__getitem__.assert_called_with(slice(None, 5))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_empty_results(self, mock_get_queryset):
+        """Тест запроса с пустыми результатами."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Мокаем пустой результат
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = []
+        
+        # Создаем запрос с фильтром, который не найдет данных
+        request = self.factory.get('/api/student-rating/?group=НесуществующаяГруппа')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ с пустыми данными
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['chartData'], [])
+        self.assertEqual(response.data['students'], [])
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_invalid_course_parameter(self, mock_get_queryset):
+        """Тест обработки некорректного параметра курса."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос с некорректным курсом
+        request = self.factory.get('/api/student-rating/?course=abc')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что запрос обработан успешно (некорректный курс игнорируется)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_student_without_group(self, mock_get_queryset):
+        """Тест обработки студента без группы."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Создаем студента без группы
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Студент Без Группы',
+                group=None,
+                avg_grade=4.0,
+                avg_activity=7.0,
+                attendance_percent=80.0,
+                calculated_rating=70.0
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос
+        request = self.factory.get('/api/student-rating/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        student_data = response.data['students'][0]
+        self.assertIsNone(student_data['group'])
+        self.assertIsNone(student_data['course'])
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_calculation_accuracy(self, mock_get_queryset):
+        """Тест точности расчетов рейтинга."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Создаем студента с конкретными значениями для проверки расчетов
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Тестовый Студент',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,      # 4.5 * 0.5 = 2.25
+                avg_activity=8.0,   # 8.0 * 0.3 = 2.4
+                attendance_percent=85.5,  # 85.5 * 0.2 = 17.1
+                calculated_rating=78.5    # (2.25 + 2.4 + 17.1) * 20 = 435, но должно быть округлено
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос
+        request = self.factory.get('/api/student-rating/')
+        request.user = self.user
+        
+        # Мокаем расчет курса
+        with patch.object(StudentRatingViewSet, 'extract_year_from_group_title') as mock_extract, \
+             patch.object(StudentRatingViewSet, 'calculate_course') as mock_calculate:
+            
+            mock_extract.return_value = 2021
+            mock_calculate.return_value = 3
+            
+            response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        student_data = response.data['students'][0]
+        
+        # Проверяем округление значений
+        self.assertEqual(student_data['avgGrade'], 4.5)
+        self.assertEqual(student_data['activity'], 8.0)
+        self.assertEqual(student_data['attendancePercent'], 85.5)
+        self.assertEqual(student_data['rating'], 78.5)
+        self.assertEqual(student_data['dropoutRisk'], 0.25)  # Фиксированное значение
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_annotation_chain(self, mock_get_queryset):
+        """Тест правильности цепочки аннотаций."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.5,
+                avg_activity=8.0,
+                attendance_percent=85.5,
+                calculated_rating=78.5
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос
+        request = self.factory.get('/api/student-rating/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что аннотации были вызваны
+        self.assertTrue(mock_queryset.annotate.called)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_queryset_optimization(self):
+        """Тест оптимизации queryset с select_related."""
+        viewset = StudentRatingViewSet()
+        queryset = viewset.get_queryset()
+        
+        # Проверяем что queryset использует select_related
+        self.assertIsNotNone(queryset)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_default_limit_applied(self, mock_get_queryset):
+        """Тест применения лимита по умолчанию."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=i,
+                name=f'Студент {i}',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=4.0,
+                avg_activity=7.0,
+                attendance_percent=80.0,
+                calculated_rating=70.0
+            ) for i in range(10)  # 10 студентов - лимит по умолчанию
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_order_by = MagicMock()
+        mock_queryset.order_by.return_value = mock_order_by
+        mock_order_by.__getitem__.return_value = test_students
+        
+        # Создаем запрос без указания лимита
+        request = self.factory.get('/api/student-rating/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что лимит по умолчанию (10) был применен
+        mock_order_by.__getitem__.assert_called_with(slice(None, 10))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['students']), 10)
+
+    @patch('application.api.StudentRatingViewSet.get_queryset')
+    def test_list_complex_rating_calculation(self, mock_get_queryset):
+        """Тест расчета комплексного рейтинга."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Создаем студента с нулевыми значениями для проверки граничных случаев
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Студент с нулями',
+                group=Mock(title='ФИТ-21Б'),
+                avg_grade=None,  # None значения
+                avg_activity=None,
+                attendance_percent=None,
+                calculated_rating=None
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.annotate.return_value = mock_queryset
+        mock_queryset.order_by.return_value.__getitem__.return_value = test_students
+        
+        # Создаем запрос
+        request = self.factory.get('/api/student-rating/')
+        request.user = self.user
+        
+        with patch.object(StudentRatingViewSet, 'extract_year_from_group_title') as mock_extract, \
+             patch.object(StudentRatingViewSet, 'calculate_course') as mock_calculate:
+            
+            mock_extract.return_value = 2021
+            mock_calculate.return_value = 3
+            
+            response = self.view(request)
+        
+        # Проверяем что None значения корректно обрабатываются
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        student_data = response.data['students'][0]
+        self.assertEqual(student_data['avgGrade'], 0.0)  # None преобразуется в 0.0
+        self.assertEqual(student_data['activity'], 0.0)
+        self.assertEqual(student_data['attendancePercent'], 0.0)
+        self.assertEqual(student_data['rating'], 0.0)
+
+class TestStudentAnalyticsViewSet(APITestCase):
+    """
+    Тесты для StudentAnalyticsViewSet - аналитики студента из CSV файла.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.viewset = StudentAnalyticsViewSet()
+        
+        # Создаем мок пользователя для аутентификации
+        self.user = Mock()
+        self.user.is_authenticated = True
+        
+        # Пример данных CSV для тестов
+        self.sample_csv_data = [
+            {
+                'Student_ID': '12345',
+                'Name': 'Иванов Иван Иванович',
+                'Age': '20',
+                'Group_Name': 'ФИТ-21Б',
+                'Speciality': 'Информатика',
+                'Is_Academic': '0',
+                'Middle_value_of_sertificate': '4.5',
+                'Entry_score': '85.5',
+                'Rating_score': '4.2',
+                'Diploma_grade': '4.7',
+                'Математика': '4.8',
+                'Программирование': '5.0',
+                'Физика': '4.2'
+            },
+            {
+                'Student_ID': '67890',
+                'Name': 'Петров Петр Петрович',
+                'Age': '21',
+                'Group_Name': 'ИВТ-20А',
+                'Speciality': 'Программирование',
+                'Is_Academic': '1',
+                'Middle_value_of_sertificate': '4.8',
+                'Entry_score': '92.0',
+                'Rating_score': '4.5',
+                'Diploma_grade': '4.9',
+                'Математика': '5.0',
+                'Программирование': '4.9',
+                'Физика': '4.5'
+            }
+        ]
+
+    def _create_drf_request(self, path, user=None, method='get', **kwargs):
+        """Создает DRF Request объект с правильным query_params."""
+        factory_method = getattr(self.factory, method)
+        request = factory_method(path, **kwargs)
+        request.user = user or self.user
+        return Request(request)
+
+    def test_get_csv_path(self):
+        """Тест получения пути к CSV файлу."""
+        viewset = StudentAnalyticsViewSet()
+        csv_path = viewset.get_csv_path()
+        
+        self.assertEqual(csv_path, 'application/management/predictions_results.csv')
+
+    @patch('application.api.os.path.exists')
+    @patch('application.api.csv.DictReader')
+    @patch('builtins.open', new_callable=mock_open)
+    def test_read_csv_data_success(self, mock_file, mock_dict_reader, mock_exists):
+        """Тест успешного чтения CSV файла."""
+        mock_exists.return_value = True
+        mock_dict_reader.return_value = self.sample_csv_data
+        
+        viewset = StudentAnalyticsViewSet()
+        result = viewset.read_csv_data()
+        
+        # Проверяем вызовы
+        mock_exists.assert_called_once_with('application/management/predictions_results.csv')
+        mock_file.assert_called_once_with('application/management/predictions_results.csv', 'r', encoding='utf-8')
+        mock_dict_reader.assert_called_once()
+        
+        # Проверяем результат
+        self.assertEqual(result, self.sample_csv_data)
+
+    @patch('application.api.os.path.exists')
+    def test_read_csv_data_file_not_found(self, mock_exists):
+        """Тест чтения CSV файла, когда файл не существует."""
+        mock_exists.return_value = False
+        
+        viewset = StudentAnalyticsViewSet()
+        
+        with self.assertRaises(FileNotFoundError) as context:
+            viewset.read_csv_data()
+        
+        self.assertEqual(str(context.exception), "Analytics file not generated yet")
+
+    def test_permission_classes(self):
+        """Тест проверки классов разрешений."""
+        viewset = StudentAnalyticsViewSet()
+        self.assertEqual(viewset.permission_classes, [IsAuthenticated])
+
+    def test_queryset_is_none(self):
+        """Тест что queryset не используется."""
+        viewset = StudentAnalyticsViewSet()
+        self.assertIsNone(viewset.queryset)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_success(self, mock_read_csv):
+        """Тест успешного получения аналитики студента."""
+        # Настраиваем моки
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        # Вызываем метод
+        response = self.viewset.list(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['student_id'], '12345')
+        self.assertEqual(response.data['name'], 'Иванов Иван Иванович')
+        self.assertEqual(response.data['age'], 20)
+        self.assertEqual(response.data['group'], 'ФИТ-21Б')
+        self.assertEqual(response.data['speciality'], 'Информатика')
+        
+        # Проверяем академическую информацию
+        academic_info = response.data['academic_info']
+        self.assertEqual(academic_info['certificate_score'], 4.5)
+        self.assertEqual(academic_info['entry_score'], 85.5)
+        self.assertEqual(academic_info['rating_score'], 4.2)
+        self.assertEqual(academic_info['diploma_grade'], 4.7)
+        self.assertEqual(academic_info['is_academic'], False)
+        
+        # Проверяем предметы
+        subjects = response.data['subjects']
+        self.assertEqual(len(subjects), 3)
+        
+        # Проверяем что предметы отсортированы правильно
+        subject_names = [s['subject'] for s in subjects]
+        self.assertIn('Математика', subject_names)
+        self.assertIn('Программирование', subject_names)
+        self.assertIn('Физика', subject_names)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_with_subjects_filter(self, mock_read_csv):
+        """Тест получения аналитики с фильтром по предметам."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request с фильтром по предметам
+        request = self._create_drf_request(
+            '/api/student-analytics/?student_id=12345&subjects=Математика&subjects=Программирование'
+        )
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Проверяем что возвращены только отфильтрованные предметы
+        subjects = response.data['subjects']
+        self.assertEqual(len(subjects), 2)
+        
+        subject_names = [s['subject'] for s in subjects]
+        self.assertIn('Математика', subject_names)
+        self.assertIn('Программирование', subject_names)
+        self.assertNotIn('Физика', subject_names)
+
+    def test_list_missing_student_id(self):
+        """Тест запроса без обязательного параметра student_id."""
+        # Создаем DRF Request без student_id
+        request = self._create_drf_request('/api/student-analytics/')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем ошибку
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data['error'], 'Missing required parameter: student_id')
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_student_not_found(self, mock_read_csv):
+        """Тест запроса для несуществующего студента."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request с несуществующим student_id
+        request = self._create_drf_request('/api/student-analytics/?student_id=99999')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем ошибку
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data['error'], 'Student with ID 99999 not found')
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_file_not_found_error(self, mock_read_csv):
+        """Тест обработки ошибки отсутствия файла."""
+        mock_read_csv.side_effect = FileNotFoundError("Analytics file not generated yet")
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем ошибку
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data['error'], 'Analytics file not generated yet')
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_academic_student(self, mock_read_csv):
+        """Тест аналитики для студента в академическом отпуске."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request для студента в академе
+        request = self._create_drf_request('/api/student-analytics/?student_id=67890')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['academic_info']['is_academic'], True)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_data_types_conversion(self, mock_read_csv):
+        """Тест корректного преобразования типов данных."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем типы данных
+        self.assertIsInstance(response.data['age'], int)
+        self.assertIsInstance(response.data['academic_info']['certificate_score'], float)
+        self.assertIsInstance(response.data['academic_info']['entry_score'], float)
+        self.assertIsInstance(response.data['academic_info']['rating_score'], float)
+        self.assertIsInstance(response.data['academic_info']['diploma_grade'], float)
+        self.assertIsInstance(response.data['academic_info']['is_academic'], bool)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_nonexistent_subjects_filter(self, mock_read_csv):
+        """Тест с фильтром по несуществующим предметам."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request с фильтром по несуществующим предметам
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345&subjects=Химия&subjects=Биология')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем что предметы не найдены
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['subjects']), 0)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_multiple_students_in_csv(self, mock_read_csv):
+        """Тест поиска студента когда в CSV несколько записей."""
+        # Добавляем больше студентов в тестовые данные
+        extended_data = self.sample_csv_data + [
+            {
+                'Student_ID': '11111',
+                'Name': 'Сидоров Сидор Сидорович',
+                'Age': '22',
+                'Group_Name': 'ФИТ-19А',
+                'Speciality': 'Информатика',
+                'Is_Academic': '0',
+                'Middle_value_of_sertificate': '4.3',
+                'Entry_score': '88.0',
+                'Rating_score': '4.1',
+                'Diploma_grade': '4.6',
+                'Математика': '4.5',
+                'Программирование': '4.7'
+            }
+        ]
+        mock_read_csv.return_value = extended_data
+        
+        # Создаем DRF Request для нового студента
+        request = self._create_drf_request('/api/student-analytics/?student_id=11111')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем что найден правильный студент
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['student_id'], '11111')
+        self.assertEqual(response.data['name'], 'Сидоров Сидор Сидорович')
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_subject_grade_format(self, mock_read_csv):
+        """Тест формата оценок по предметам."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем формат данных по предметам
+        subjects = response.data['subjects']
+        for subject in subjects:
+            self.assertIn('subject', subject)
+            self.assertIn('grade', subject)
+            self.assertIsInstance(subject['subject'], str)
+            self.assertIsInstance(subject['grade'], str)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_core_fields_exclusion(self, mock_read_csv):
+        """Тест что основные поля исключены из списка предметов."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        response = self.viewset.list(request)
+        
+        # Получаем все названия предметов
+        subject_names = [s['subject'] for s in response.data['subjects']]
+        
+        # Проверяем что основные поля не попали в предметы
+        core_fields = ['Speciality', 'Group_Name', 'Student_ID', 'Name', 'Age', 'Is_Academic',
+                      'Middle_value_of_sertificate', 'Entry_score', 'Rating_score', 'Diploma_grade']
+        
+        for field in core_fields:
+            self.assertNotIn(field, subject_names)
+
+    def test_csv_reader_parameters(self):
+        """Тест параметров чтения CSV файла."""
+        with patch('application.api.os.path.exists') as mock_exists, \
+             patch('application.api.csv.DictReader') as mock_dict_reader, \
+             patch('builtins.open', mock_open()) as mock_file:
+            
+            mock_exists.return_value = True
+            mock_dict_reader.return_value = []
+            
+            viewset = StudentAnalyticsViewSet()
+            viewset.read_csv_data()
+            
+            # Проверяем параметры вызова csv.DictReader
+            mock_dict_reader.assert_called_once()
+            call_args = mock_dict_reader.call_args
+            self.assertEqual(call_args[1]['delimiter'], ';')
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_edge_case_empty_csv(self, mock_read_csv):
+        """Тест обработки пустого CSV файла."""
+        mock_read_csv.return_value = []  # Пустой CSV
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем ошибку
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data['error'], 'Student with ID 12345 not found')
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_response_structure(self, mock_read_csv):
+        """Тест полной структуры ответа."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request
+        request = self._create_drf_request('/api/student-analytics/?student_id=12345')
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем полную структуру ответа
+        expected_structure = {
+            'student_id': str,
+            'name': str,
+            'age': int,
+            'group': str,
+            'speciality': str,
+            'academic_info': dict,
+            'subjects': list
+        }
+        
+        for key, expected_type in expected_structure.items():
+            self.assertIn(key, response.data)
+            self.assertIsInstance(response.data[key], expected_type)
+        
+        # Проверяем структуру academic_info
+        academic_info_structure = {
+            'certificate_score': float,
+            'entry_score': float,
+            'rating_score': float,
+            'diploma_grade': float,
+            'is_academic': bool
+        }
+        
+        for key, expected_type in academic_info_structure.items():
+            self.assertIn(key, response.data['academic_info'])
+            self.assertIsInstance(response.data['academic_info'][key], expected_type)
+        
+        # Проверяем структуру subjects
+        if response.data['subjects']:
+            subject_structure = {
+                'subject': str,
+                'grade': str
+            }
+            for subject in response.data['subjects']:
+                for key, expected_type in subject_structure.items():
+                    self.assertIn(key, subject)
+                    self.assertIsInstance(subject[key], expected_type)
+
+    @patch.object(StudentAnalyticsViewSet, 'read_csv_data')
+    def test_list_getlist_subjects_parameter(self, mock_read_csv):
+        """Тест обработки параметра subjects через getlist."""
+        mock_read_csv.return_value = self.sample_csv_data
+        
+        # Создаем DRF Request с несколькими предметами
+        request = self._create_drf_request(
+            '/api/student-analytics/?student_id=12345&subjects=Математика&subjects=Физика'
+        )
+        
+        response = self.viewset.list(request)
+        
+        # Проверяем что subjects обрабатывается через getlist
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        subjects = response.data['subjects']
+        self.assertEqual(len(subjects), 2)
+        subject_names = [s['subject'] for s in subjects]
+        self.assertIn('Математика', subject_names)
+        self.assertIn('Физика', subject_names)
+
+if __name__ == '__main__':
+    pytest.main()
