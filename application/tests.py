@@ -17,6 +17,786 @@ from rest_framework.request import Request
 from application.models import *
 from application.api import *
 
+# Добавить в конец файла tests.py
+
+class TestGradesViewset(APITestCase):
+    """
+    Тесты для GradesViewset - получения оценок студентов с агрегированной статистикой.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.view = GradesViewset.as_view({'get': 'list'})
+        
+        # Создаем мок пользователя для аутентификации
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        self.user.is_authenticated = True
+
+    def test_calculate_course_before_september(self):
+        """Тест расчета курса до сентября."""
+        viewset = GradesViewset()
+        
+        with patch('application.api.datetime') as mock_datetime:
+            mock_now = Mock()
+            mock_now.year = 2024
+            mock_now.month = 8  # Август (до сентября)
+            mock_datetime.now.return_value = mock_now
+            
+            course = viewset.calculate_course(2021)
+            self.assertEqual(course, 3)  # 2024 - 2021 = 3
+
+    def test_calculate_course_after_september(self):
+        """Тест расчета курса после сентября."""
+        viewset = GradesViewset()
+        
+        with patch('application.api.datetime') as mock_datetime:
+            mock_now = Mock()
+            mock_now.year = 2024
+            mock_now.month = 9  # Сентябрь
+            mock_datetime.now.return_value = mock_now
+            
+            course = viewset.calculate_course(2021)
+            self.assertEqual(course, 4)  # 2024 - 2021 + 1 = 4
+
+    def test_extract_year_from_group_title_valid(self):
+        """Тест извлечения года из корректного названия группы."""
+        viewset = GradesViewset()
+        
+        year = viewset.extract_year_from_group_title('ФИТ-21Б')
+        self.assertEqual(year, 2021)
+        
+        year = viewset.extract_year_from_group_title('ИВТ-19А')
+        self.assertEqual(year, 2019)
+
+    def test_extract_year_from_group_title_invalid(self):
+        """Тест извлечения года из некорректного названия группы."""
+        viewset = GradesViewset()
+        
+        # Некорректные форматы
+        self.assertIsNone(viewset.extract_year_from_group_title('ФИТ21Б'))
+        self.assertIsNone(viewset.extract_year_from_group_title('ФИТ-'))
+        self.assertIsNone(viewset.extract_year_from_group_title(''))
+        self.assertIsNone(viewset.extract_year_from_group_title(None))
+
+    def test_student_is_still_enrolled_current_year(self):
+        """Тест проверки что студент продолжает обучение (текущий год)."""
+        viewset = GradesViewset()
+        
+        current_year = datetime.now().year
+        admission_year = current_year - 2  # 2 курс
+        
+        result = viewset.student_is_still_enrolled(admission_year)
+        self.assertTrue(result)
+
+    def test_student_is_still_enrolled_graduated(self):
+        """Тест проверки что студент уже выпустился."""
+        viewset = GradesViewset()
+        
+        current_year = datetime.now().year
+        admission_year = current_year - 5  # Должен был выпуститься
+        
+        result = viewset.student_is_still_enrolled(admission_year)
+        self.assertFalse(result)
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_basic_request(self, mock_course_projects, mock_grades):
+        """Тест базового запроса без параметров."""
+        # Настраиваем моки
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Настраиваем цепочку вызовов для grades
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_grades_queryset.select_related.return_value = mock_grades_queryset
+        
+        # Настраиваем цепочку вызовов для course_projects
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.select_related.return_value = mock_course_projects_queryset
+        
+        # Создаем тестовые данные для итерации
+        test_grades = [
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Иванов Иван',
+                    group=Mock(title='ФИТ-21Б')
+                ),
+                fc=Mock(
+                    hps=Mock(
+                        disciple=Mock(
+                            disciple_name='Математика',
+                            disciple_id=1
+                        )
+                    )
+                ),
+                grade='5'
+            )
+        ]
+        
+        test_course_projects = [
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Иванов Иван', 
+                    group=Mock(title='ФИТ-21Б')
+                ),
+                hps=Mock(
+                    disciple=Mock(
+                        disciple_name='Программирование',
+                        disciple_id=2
+                    )
+                ),
+                grade=4
+            )
+        ]
+        
+        mock_grades_queryset.__iter__ = Mock(return_value=iter(test_grades))
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter(test_course_projects))
+        
+        # Создаем запрос
+        request = self.factory.get('/api/grades/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('summary', response.data)
+        self.assertIn('students', response.data)
+        self.assertIn('subjects', response.data)
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_with_course_filter(self, mock_course_projects, mock_grades):
+        """Тест запроса с фильтром по курсу."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Настраиваем цепочки вызовов
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_grades_queryset.select_related.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.select_related.return_value = mock_course_projects_queryset
+        
+        # Пустые результаты
+        mock_grades_queryset.__iter__ = Mock(return_value=iter([]))
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        # Создаем запрос с фильтром по курсу
+        request = self.factory.get('/api/grades/?course=2')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_with_semester_filter(self, mock_course_projects, mock_grades):
+        """Тест запроса с фильтром по семестру."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Проверяем что фильтр по семестру применяется
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        
+        mock_grades_queryset.__iter__ = Mock(return_value=iter([]))
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        request = self.factory.get('/api/grades/?semester=1')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что фильтр был применен
+        mock_grades_queryset.filter.assert_called_with(fc__hps__semester='1')
+        mock_course_projects_queryset.filter.assert_called_with(hps__semester='1')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_with_group_filter(self, mock_course_projects, mock_grades):
+        """Тест запроса с фильтром по группе."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        
+        mock_grades_queryset.__iter__ = Mock(return_value=iter([]))
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        request = self.factory.get('/api/grades/?group=ФИТ-21Б')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что фильтр по группе был применен
+        mock_grades_queryset.filter.assert_called_with(student__group__title='ФИТ-21Б')
+        mock_course_projects_queryset.filter.assert_called_with(student__group__title='ФИТ-21Б')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_with_subject_filter(self, mock_course_projects, mock_grades):
+        """Тест запроса с фильтром по предмету."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        
+        mock_grades_queryset.__iter__ = Mock(return_value=iter([]))
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        request = self.factory.get('/api/grades/?subject=Математика')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что фильтр по предмету был применен
+        mock_grades_queryset.filter.assert_called_with(fc__hps__disciple__disciple_name='Математика')
+        mock_course_projects_queryset.filter.assert_called_with(hps__disciple__disciple_name='Математика')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_invalid_course_semester_combination(self, mock_course_projects, mock_grades):
+        """Тест некорректной комбинации курса и семестра."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Создаем запрос с некорректной комбинацией курса и семестра
+        request = self.factory.get('/api/grades/?course=1&semester=3')  # Для 1 курса допустимы семестры 1 и 2
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что возвращается пустой ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['summary']['totalStudents'], 0)
+        self.assertIsNone(response.data['summary']['averageGrade'])
+        self.assertEqual(response.data['students'], [])
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_empty_results(self, mock_course_projects, mock_grades):
+        """Тест запроса с пустыми результатами."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Пустые результаты
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_grades_queryset.select_related.return_value = mock_grades_queryset
+        mock_grades_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.select_related.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        request = self.factory.get('/api/grades/?subject=НесуществующийПредмет')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ с пустыми данными
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['summary']['totalStudents'], 0)
+        self.assertIsNone(response.data['summary']['averageGrade'])
+        self.assertEqual(response.data['students'], [])
+        self.assertEqual(response.data['subjects'], [])
+
+    def test_queryset_optimization(self):
+        """Тест оптимизации queryset с select_related."""
+        viewset = GradesViewset()
+        queryset = viewset.get_queryset()
+        
+        # Проверяем что queryset использует select_related
+        self.assertIsNotNone(queryset)
+
+
+class TestAcademicPerformanceViewSet(APITestCase):
+    """
+    Тесты для AcademicPerformanceViewSet - статистики по успеваемости с учётом задолженностей.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.view = AcademicPerformanceViewSet.as_view({'get': 'list'})
+        
+        # Создаем мок пользователя для аутентификации
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        self.user.is_authenticated = True
+
+    def test_get_active_debts_filter(self):
+        """Тест создания фильтра для активных задолженностей."""
+        viewset = AcademicPerformanceViewSet()
+        active_debts_filter = viewset.get_active_debts_filter()
+        
+        # Проверяем что фильтр создан корректно
+        self.assertIsNotNone(active_debts_filter)
+
+    @patch('application.api.Student.objects.select_related')
+    def test_get_queryset_optimization(self, mock_select_related):
+        """Тест оптимизации queryset с select_related."""
+        mock_queryset = Mock()
+        mock_select_related.return_value.annotate.return_value.order_by.return_value = mock_queryset
+        
+        viewset = AcademicPerformanceViewSet()
+        queryset = viewset.get_queryset()
+        
+        # Проверяем что select_related был вызван
+        mock_select_related.assert_called_once_with('group')
+        self.assertIsNotNone(queryset)
+
+    @patch.object(AcademicPerformanceViewSet, 'get_queryset')
+    def test_list_basic_request(self, mock_get_queryset):
+        """Тест базового запроса без параметров."""
+        # Создаем тестовых студентов
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                active_debt_count=0
+            ),
+            Mock(
+                student_id=2,
+                name='Петров Петр',
+                group=Mock(title='ФИТ-21Б'),
+                active_debt_count=2
+            )
+        ]
+        
+        # Настраиваем моки
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = Mock(return_value=iter(test_students))
+        
+        # Мокаем агрегатные функции
+        mock_queryset.aggregate.return_value = {
+            'zero_debts': 1,
+            'one_debt': 0,
+            'two_debts': 1,
+            'three_plus_debts': 0
+        }
+        
+        # Мокаем расчет статистики по группам
+        with patch.object(AcademicPerformanceViewSet, 'calculate_group_stats') as mock_group_stats:
+            mock_group_stats.return_value = [
+                {'group': 'ФИТ-21Б', 'avgDebts': 1.0}
+            ]
+            
+            # Создаем запрос
+            request = self.factory.get('/api/academic-performance/')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Проверяем ответ
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn('debtsDistribution', response.data)
+            self.assertIn('groupAverages', response.data)
+            self.assertIn('students', response.data)
+            
+            # Проверяем структуру данных
+            debt_dist = response.data['debtsDistribution']
+            self.assertEqual(debt_dist['0'], 1)
+            self.assertEqual(debt_dist['1'], 0)
+            self.assertEqual(debt_dist['2'], 1)
+            self.assertEqual(debt_dist['3plus'], 0)
+            
+            self.assertEqual(len(response.data['students']), 2)
+
+    @patch.object(AcademicPerformanceViewSet, 'get_queryset')
+    def test_list_with_group_filter(self, mock_get_queryset):
+        """Тест запроса с фильтром по группе."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                active_debt_count=1
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = Mock(return_value=iter(test_students))
+        mock_queryset.aggregate.return_value = {
+            'zero_debts': 0, 'one_debt': 1, 'two_debts': 0, 'three_plus_debts': 0
+        }
+        
+        with patch.object(AcademicPerformanceViewSet, 'calculate_group_stats') as mock_group_stats:
+            mock_group_stats.return_value = [
+                {'group': 'ФИТ-21Б', 'avgDebts': 1.0}
+            ]
+            
+            # Создаем запрос с фильтром по группе
+            request = self.factory.get('/api/academic-performance/?group=ФИТ-21Б')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Проверяем что фильтр по группе был применен
+            mock_queryset.filter.assert_called_with(group__title='ФИТ-21Б')
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch.object(AcademicPerformanceViewSet, 'get_queryset')
+    def test_list_with_search_filter(self, mock_get_queryset):
+        """Тест запроса с поисковым фильтром."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                active_debt_count=0
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = Mock(return_value=iter(test_students))
+        mock_queryset.aggregate.return_value = {
+            'zero_debts': 1, 'one_debt': 0, 'two_debts': 0, 'three_plus_debts': 0
+        }
+        
+        with patch.object(AcademicPerformanceViewSet, 'calculate_group_stats') as mock_group_stats:
+            mock_group_stats.return_value = []
+            
+            # Создаем запрос с поисковым запросом
+            request = self.factory.get('/api/academic-performance/?search=Иванов')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Проверяем что поисковый фильтр был применен
+            mock_queryset.filter.assert_called_with(name__icontains='Иванов')
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    @patch.object(AcademicPerformanceViewSet, 'get_queryset')
+    def test_list_empty_results(self, mock_get_queryset):
+        """Тест запроса с пустыми результатами."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        # Пустые результаты
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = Mock(return_value=iter([]))
+        mock_queryset.aggregate.return_value = {
+            'zero_debts': 0, 'one_debt': 0, 'two_debts': 0, 'three_plus_debts': 0
+        }
+        
+        with patch.object(AcademicPerformanceViewSet, 'calculate_group_stats') as mock_group_stats:
+            mock_group_stats.return_value = []
+            
+            # Создаем запрос с фильтром, который не найдет данных
+            request = self.factory.get('/api/academic-performance/?group=НесуществующаяГруппа')
+            request.user = self.user
+            response = self.view(request)
+            
+            # Проверяем ответ с пустыми данными
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data['debtsDistribution']['0'], 0)
+            self.assertEqual(response.data['groupAverages'], [])
+            self.assertEqual(response.data['students'], [])
+
+    @patch.object(AcademicPerformanceViewSet, 'get_queryset')
+    def test_calculate_group_stats_integration(self, mock_get_queryset):
+        """Тест интеграции расчета статистики по группам."""
+        mock_queryset = MagicMock()
+        mock_get_queryset.return_value = mock_queryset
+        
+        test_students = [
+            Mock(
+                student_id=1,
+                name='Иванов Иван',
+                group=Mock(title='ФИТ-21Б'),
+                active_debt_count=1
+            )
+        ]
+        
+        mock_queryset.filter.return_value = mock_queryset
+        mock_queryset.__iter__ = Mock(return_value=iter(test_students))
+        mock_queryset.aggregate.return_value = {
+            'zero_debts': 0, 'one_debt': 1, 'two_debts': 0, 'three_plus_debts': 0
+        }
+        
+        # Мокаем Group.objects
+        with patch('application.api.Group.objects') as mock_group_objects:
+            mock_group = Mock()
+            mock_group.title = 'ФИТ-21Б'
+            mock_group_objects.filter.return_value.distinct.return_value = [mock_group]
+            
+            # Мокаем Student.objects с аннотацией
+            mock_student_queryset = MagicMock()
+            with patch('application.api.Student.objects') as mock_student_objects:
+                mock_student_objects.filter.return_value.annotate.return_value.aggregate.return_value = {
+                    'avg': 1.0
+                }
+                
+                request = self.factory.get('/api/academic-performance/')
+                request.user = self.user
+                response = self.view(request)
+                
+                # Проверяем ответ
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertIn('groupAverages', response.data)
+
+
+class TestTrainModelViewSet(APITestCase):
+    """
+    Тесты для TrainModelViewSet - запуска обучения ML-модели аналитики студентов.
+    """
+
+    def setUp(self):
+        """Настройка тестовых данных перед каждым тестом."""
+        self.factory = APIRequestFactory()
+        self.view = TrainModelViewSet.as_view({'get': 'list'})
+        
+        # Создаем мок пользователя для аутентификации
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        self.user.is_authenticated = True
+
+    def test_permission_classes(self):
+        """Тест проверки классов разрешений."""
+        viewset = TrainModelViewSet()
+        self.assertEqual(viewset.permission_classes, [IsAuthenticated])
+
+    @patch('application.api.call_command')
+    def test_list_success(self, mock_call_command):
+        """Тест успешного запуска обучения модели."""
+        # Настраиваем мок
+        mock_call_command.return_value = None
+        
+        # Создаем запрос
+        request = self.factory.get('/api/train-model/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['message'], "Модель успешно обучена, результаты сохранены в CSV.")
+        
+        # Проверяем что команда была вызвана
+        mock_call_command.assert_called_once_with('analytics')
+
+    @patch('application.api.call_command')
+    def test_list_command_error(self, mock_call_command):
+        """Тест обработки ошибки при выполнении команды."""
+        # Настраиваем мок для выброса исключения
+        mock_call_command.side_effect = Exception("Test error")
+        
+        # Создаем запрос
+        request = self.factory.get('/api/train-model/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ с ошибкой
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.assertEqual(response.data['error'], "Test error")
+
+    def test_queryset_is_none(self):
+        """Тест что queryset не используется."""
+        viewset = TrainModelViewSet()
+        self.assertIsNone(viewset.queryset)
+
+    @patch('application.api.call_command')
+    def test_list_unauthenticated_user(self, mock_call_command):
+        """Тест запроса от неаутентифицированного пользователя."""
+        # Создаем запрос без пользователя
+        request = self.factory.get('/api/train-model/')
+        
+        # Должен вернуть 403 из-за IsAuthenticated permission
+        response = self.view(request)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        
+        # Команда не должна быть вызвана
+        mock_call_command.assert_not_called()
+
+
+# Дополнительные тесты для edge cases GradesViewset
+class TestGradesViewsetEdgeCases(APITestCase):
+    """Тесты для граничных случаев GradesViewset."""
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.view = GradesViewset.as_view({'get': 'list'})
+        
+        self.user = Mock(spec=Administrator)
+        self.user.email = 'testuser@example.com'
+        self.user.is_authenticated = True
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_various_grade_types(self, mock_course_projects, mock_grades):
+        """Тест обработки различных типов оценок."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Создаем тестовые данные с разными типами оценок
+        test_grades = [
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Иванов Иван',
+                    group=Mock(title='ФИТ-21Б')
+                ),
+                fc=Mock(
+                    hps=Mock(
+                        disciple=Mock(
+                            disciple_name='Математика',
+                            disciple_id=1
+                        )
+                    )
+                ),
+                grade='5'  # Числовая оценка
+            ),
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Иванов Иван',
+                    group=Mock(title='ФИТ-21Б')
+                ),
+                fc=Mock(
+                    hps=Mock(
+                        disciple=Mock(
+                            disciple_name='Физика',
+                            disciple_id=2
+                        )
+                    )
+                ),
+                grade='зачет'  # Зачет
+            ),
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Иванов Иван',
+                    group=Mock(title='ФИТ-21Б')
+                ),
+                fc=Mock(
+                    hps=Mock(
+                        disciple=Mock(
+                            disciple_name='Химия',
+                            disciple_id=3
+                        )
+                    )
+                ),
+                grade='неявка'  # Неявка
+            )
+        ]
+        
+        test_course_projects = [
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Иванов Иван',
+                    group=Mock(title='ФИТ-21Б')
+                ),
+                hps=Mock(
+                    disciple=Mock(
+                        disciple_name='Программирование',
+                        disciple_id=4
+                    )
+                ),
+                grade=4  # Числовая оценка курсового проекта
+            )
+        ]
+        
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_grades_queryset.select_related.return_value = mock_grades_queryset
+        mock_grades_queryset.__iter__ = Mock(return_value=iter(test_grades))
+        
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.select_related.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter(test_course_projects))
+        
+        request = self.factory.get('/api/grades/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем что все типы оценок обработаны
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['students']), 1)
+        student_data = response.data['students'][0]
+        self.assertEqual(len(student_data['subjects']), 4)  # 4 предмета
+
+    @patch('application.api.Grades.objects.select_related')
+    @patch('application.api.CourseProjects.objects.select_related')
+    def test_list_student_without_group(self, mock_course_projects, mock_grades):
+        """Тест обработки студента без группы."""
+        mock_grades_queryset = MagicMock()
+        mock_grades.return_value = mock_grades_queryset
+        
+        mock_course_projects_queryset = MagicMock()
+        mock_course_projects.return_value = mock_course_projects_queryset
+        
+        # Создаем студента без группы
+        test_grades = [
+            Mock(
+                student=Mock(
+                    student_id=1,
+                    name='Студент Без Группы',
+                    group=None  # Нет группы
+                ),
+                fc=Mock(
+                    hps=Mock(
+                        disciple=Mock(
+                            disciple_name='Математика',
+                            disciple_id=1
+                        )
+                    )
+                ),
+                grade='4'
+            )
+        ]
+        
+        mock_grades_queryset.filter.return_value = mock_grades_queryset
+        mock_grades_queryset.select_related.return_value = mock_grades_queryset
+        mock_grades_queryset.__iter__ = Mock(return_value=iter(test_grades))
+        
+        mock_course_projects_queryset.filter.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.select_related.return_value = mock_course_projects_queryset
+        mock_course_projects_queryset.__iter__ = Mock(return_value=iter([]))
+        
+        request = self.factory.get('/api/grades/')
+        request.user = self.user
+        response = self.view(request)
+        
+        # Проверяем ответ
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        student_data = response.data['students'][0]
+        self.assertIsNone(student_data['group'])
+        self.assertIsNone(student_data['course'])
 
 class TestAcademicReturnsViewSet(APITestCase):
     """
