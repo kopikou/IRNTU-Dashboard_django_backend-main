@@ -32,11 +32,11 @@ from rest_framework.routers import DefaultRouter
 from application.api import GradesViewset, SubjectStatisticsViewSet, AcademicPerformanceViewSet, AcademicReturnsViewSet, StudentRatingViewSet, TrainModelViewSet, StudentAnalyticsViewSet
 
 router = DefaultRouter()
-router.register("statistics/marks", GradesViewset, basename="grades")
+router.register("statistics/marks", GradesViewset, basename="api-grades")
 router.register("statistics/subject", SubjectStatisticsViewSet, basename="subject")
 router.register("academic/performance", AcademicPerformanceViewSet, basename="performance")
 router.register("academic/returns", AcademicReturnsViewSet, basename="returns")
-router.register("student-rating", StudentRatingViewSet, basename="rating")
+router.register("student-rating", StudentRatingViewSet, basename="api-rating")
 router.register("statistics/train-model", TrainModelViewSet, basename="ml-train")
 router.register("student-analytics", StudentAnalyticsViewSet, basename="get_analytics")
 
