@@ -1397,88 +1397,61 @@ class StudentRatingViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         }, status=status.HTTP_200_OK)
 
     
-# class TrainModelViewSet(viewsets.ViewSet):
-#     """
-#     ViewSet для запуска обучения ML-модели аналитики студентов.
-    
-#     Назначение:
-#     - Предоставляет API endpoint для запуска процесса обучения модели
-#     - Вызывает Django management command для генерации предсказаний
-#     - Сохраняет результаты анализа в CSV файл для последующего использования
-    
-#     Требования:
-#     - Пользователь должен быть аутентифицирован (IsAuthenticated)
-#     - Должна существовать management command 'analytics'
-#     - Необходимы соответствующие права для выполнения команды
-    
-#     Входные параметры:
-#     - Не требуются (GET запрос без параметров)
-    
-#     Выходные данные:
-#     - Успех: сообщение об успешном выполнении
-#     - Ошибка: описание ошибки при выполнении команды
-#     """
-#     permission_classes = [IsAuthenticated]
-
-#     def list(self, request):
-#         """
-#         Обрабатывает GET-запрос для запуска обучения модели.
-        
-#         Входные параметры:
-#         - request: HTTP-запрос (без параметров)
-        
-#         Выходные данные:
-#         - Response: JSON объект с результатом выполнения:
-#           Успех (200):
-#           {
-#             "message": "Модель успешно обучена, результаты сохранены в CSV."
-#           }
-          
-#           Ошибка (500):
-#           {
-#             "error": "Описание ошибки"
-#           }
-        
-#         Процесс работы:
-#         1. Вызывает management command 'analytics'
-#         2. Ожидает завершения процесса обучения модели
-#         3. Сохраняет результаты в CSV файл
-#         4. Возвращает статус выполнения
-        
-#         Особенности:
-#         - Команда выполняется синхронно (блокирующе)
-#         - Требует значительных вычислительных ресурсов
-#         - Рекомендуется использовать для периодического переобучения модели
-#         """
-#         try:
-#             call_command('analytics')
-#             return Response(
-#                 {"message": "Модель успешно обучена, результаты сохранены в CSV."},
-#                 status=status.HTTP_200_OK
-#             )
-#         except Exception as e:
-#             return Response(
-#                 {"error": str(e)},
-#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
-#             )
 class TrainModelViewSet(viewsets.ViewSet):
     """
     ViewSet для запуска обучения ML-модели аналитики студентов.
-    ЗАГЛУШКА: Имитирует обучение модели без реального выполнения
+    
+    Назначение:
+    - Предоставляет API endpoint для запуска процесса обучения модели
+    - Вызывает Django management command для генерации предсказаний
+    - Сохраняет результаты анализа в CSV файл для последующего использования
+    
+    Требования:
+    - Пользователь должен быть аутентифицирован (IsAuthenticated)
+    - Должна существовать management command 'analytics'
+    - Необходимы соответствующие права для выполнения команды
+    
+    Входные параметры:
+    - Не требуются (GET запрос без параметров)
+    
+    Выходные данные:
+    - Успех: сообщение об успешном выполнении
+    - Ошибка: описание ошибки при выполнении команды
     """
     permission_classes = [IsAuthenticated]
 
     def list(self, request):
         """
-        ЗАГЛУШКА: Имитирует процесс обучения модели
+        Обрабатывает GET-запрос для запуска обучения модели.
+        
+        Входные параметры:
+        - request: HTTP-запрос (без параметров)
+        
+        Выходные данные:
+        - Response: JSON объект с результатом выполнения:
+          Успех (200):
+          {
+            "message": "Модель успешно обучена, результаты сохранены в CSV."
+          }
+          
+          Ошибка (500):
+          {
+            "error": "Описание ошибки"
+          }
+        
+        Процесс работы:
+        1. Вызывает management command 'analytics'
+        2. Ожидает завершения процесса обучения модели
+        3. Сохраняет результаты в CSV файл
+        4. Возвращает статус выполнения
+        
+        Особенности:
+        - Команда выполняется синхронно (блокирующе)
+        - Требует значительных вычислительных ресурсов
+        - Рекомендуется использовать для периодического переобучения модели
         """
         try:
-            # Имитируем вызов команды analytics
-            self._simulate_training()
-            
-            # Создаем фиктивный CSV файл с результатами
-            self._create_mock_predictions_csv()
-            
+            call_command('analytics')
             return Response(
                 {"message": "Модель успешно обучена, результаты сохранены в CSV."},
                 status=status.HTTP_200_OK
@@ -1488,359 +1461,117 @@ class TrainModelViewSet(viewsets.ViewSet):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-    
-    def _simulate_training(self):
-        """
-        ЗАГЛУШКА: Имитирует процесс обучения модели
-        """
-        # Имитируем задержку обучения 
-        import time
-        time.sleep(2)
-        
-        # Логирование имитации обучения
-        print("Имитация обучения модели...")
-        print("Загрузка данных...")
-        print("Обучение RandomForest...")
-        print("Генерация предсказаний...")
-    
-    def _create_mock_predictions_csv(self):
-        """
-        ЗАГЛУШКА: Создает фиктивный CSV файл с результатами предсказаний
-        """
-        csv_path = 'application/management/predictions_results.csv'
-        
-        # Создаем директорию если не существует
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
-        
-        # Фиктивные данные студентов
-        mock_students = [
-            {
-                'Student_ID': '495',
-                'Name': 'Иванов Иван Иванович',
-                'Age': '20',
-                'Group_Name': 'ФИТ-21Б',
-                'Speciality': 'Информатика',
-                'Middle_value_of_sertificate': '4.5',
-                'Entry_score': '85.5',
-                'Rating_score': '4.2',
-                'Diploma_grade': '4.7',
-                'Is_Academic': '1',
-                'Математика': '4.8',
-                'Программирование': '5.0',
-                'Физика': '4.5',
-                'Английский язык': '4.2',
-                'Базы данных': '4.9'
-            },
-            {
-                'Student_ID': '496',
-                'Name': 'Петров Петр Петрович',
-                'Age': '21',
-                'Group_Name': 'ФИТ-21А',
-                'Speciality': 'Информатика',
-                'Middle_value_of_sertificate': '4.2',
-                'Entry_score': '82.0',
-                'Rating_score': '4.0',
-                'Diploma_grade': '4.3',
-                'Is_Academic': '0',
-                'Математика': '4.3',
-                'Программирование': '4.7',
-                'Физика': '3.8',
-                'Английский язык': '4.5',
-                'Базы данных': '4.6'
-            },
-            {
-                'Student_ID': '497',
-                'Name': 'Сидорова Анна Сергеевна',
-                'Age': '19',
-                'Group_Name': 'ФИТ-21В',
-                'Speciality': 'Программная инженерия',
-                'Middle_value_of_sertificate': '4.8',
-                'Entry_score': '89.0',
-                'Rating_score': '4.7',
-                'Diploma_grade': '4.9',
-                'Is_Academic': '1',
-                'Математика': '5.0',
-                'Программирование': '5.0',
-                'Физика': '4.8',
-                'Английский язык': '4.9',
-                'Базы данных': '5.0'
-            }
-        ]
-        
-        # Получаем все уникальные предметы
-        all_subjects = set()
-        for student in mock_students:
-            for key in student.keys():
-                if key not in ['Student_ID', 'Name', 'Age', 'Group_Name', 'Speciality', 
-                              'Middle_value_of_sertificate', 'Entry_score', 'Rating_score', 
-                              'Diploma_grade', 'Is_Academic']:
-                    all_subjects.add(key)
-        
-        # Создаем заголовки CSV
-        fieldnames = [
-            'Student_ID', 'Name', 'Age', 'Group_Name', 'Speciality',
-            'Middle_value_of_sertificate', 'Entry_score', 'Rating_score',
-            'Diploma_grade', 'Is_Academic'
-        ] + list(all_subjects)
-        
-        # Записываем данные в CSV
-        with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';')
-            writer.writeheader()
-            
-            for student in mock_students:
-                # Заполняем отсутствующие предметы нулями
-                for subject in all_subjects:
-                    if subject not in student:
-                        student[subject] = '0'
-                writer.writerow(student)
-        
-        print(f"Создан фиктивный CSV файл с {len(mock_students)} студентами")
-
                  
-# class StudentAnalyticsViewSet(viewsets.ViewSet):
-#     """
-#     ViewSet для получения аналитики студента из предварительно сгенерированного CSV файла.
-    
-#     Назначение:
-#     - Предоставляет API endpoint для доступа к результатам ML-аналитики
-#     - Читает данные из CSV файла, созданного командой 'analytics'
-#     - Фильтрует предметы по запросу для оптимизации ответа
-    
-#     Входные параметры (query parameters):
-#     - student_id (обязательный) - идентификатор студента
-#     - subjects (опционально) - список предметов для фильтрации
-    
-#     Требования:
-#     - Пользователь должен быть аутентифицирован
-#     - CSV файл должен быть предварительно сгенерирован через TrainModelViewSet
-#     - Файл должен находиться по указанному пути
-    
-#     Выходные данные:
-#     - Детальная аналитическая информация по студенту
-#     - Успеваемость по предметам
-#     - Академические показатели
-#     """
-#     permission_classes = [IsAuthenticated]
-#     queryset = None  # Не требуется модель
-    
-#     def get_csv_path(self):
-#         """
-#         Возвращает путь к CSV файлу с результатами аналитики.
-        
-#         Возвращает:
-#         - str: абсолютный или относительный путь к файлу
-        
-#         Расположение файла:
-#         - 'application/management/predictions_results.csv'
-#         - Файл генерируется management command 'analytics'
-#         """
-#         return 'application/management/predictions_results.csv'
-
-#     def read_csv_data(self):
-#         """
-#         Читает и кэширует данные из CSV файла.
-        
-#         Возвращает:
-#         - list: список словарей с данными из CSV
-        
-#         Исключения:
-#         - FileNotFoundError: если файл не существует
-#         - CSV parsing errors: при проблемах с форматом файла
-        
-#         Особенности:
-#         - Использует кодировку UTF-8
-#         - Разделитель - точка с запятой (;)
-#         - Первая строка содержит заголовки
-#         """
-#         csv_path = self.get_csv_path()
-
-#         if not os.path.exists(csv_path):
-#             raise FileNotFoundError("Analytics file not generated yet")
-
-#         with open(csv_path, 'r', encoding='utf-8') as f:
-#             return list(csv.DictReader(f, delimiter=';'))  
-
-#     def list(self, request, *args, **kwargs):
-#         """
-#         Обрабатывает GET-запрос для получения аналитики студента.
-        
-#         Входные параметры (query parameters):
-#         - student_id: str (обязательный) - ID студента
-#         - subjects: list (опционально) - список предметов для фильтрации
-        
-#         Выходные данные:
-#         - Response: JSON объект со структурой:
-#           {
-#             "student_id": "12345",
-#             "name": "Иванов Иван Иванович",
-#             "age": 20,
-#             "group": "ФИТ-21Б",
-#             "speciality": "Информатика",
-#             "academic_info": {
-#                 "certificate_score": 4.5,
-#                 "entry_score": 85.5,
-#                 "rating_score": 4.2,
-#                 "diploma_grade": 4.7,
-#                 "is_academic": false
-#             },
-#             "subjects": [
-#                 {
-#                     "subject": "Математика",
-#                     "grade": "4.8"
-#                 },
-#                 {
-#                     "subject": "Программирование", 
-#                     "grade": "5.0"
-#                 }
-#             ]
-#           }
-        
-#         Коды ответов:
-#         - 200: Успешный запрос
-#         - 400: Отсутствует обязательный параметр student_id
-#         - 404: Файл не найден или студент не найден в файле
-#         - 500: Внутренняя ошибка сервера
-        
-#         Логика работы:
-#         1. Проверка обязательного параметра student_id
-#         2. Чтение данных из CSV файла
-#         3. Поиск студента по ID
-#         4. Формирование структурированного ответа
-#         5. Фильтрация предметов по запросу (если указано)
-#         """
-#         student_id = request.query_params.get('student_id')
-#         subjects_filter = request.query_params.getlist('subjects', [])
-
-#         if not student_id:
-#             return Response(
-#                 {"error": "Missing required parameter: student_id"},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         try:
-#             csv_data = self.read_csv_data()
-#         except FileNotFoundError as e:
-#             return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
-
-#         # Найдём строку нужного студента
-#         student_row = next((row for row in csv_data if row['Student_ID'] == student_id), None)
-
-#         if not student_row:
-#             return Response(
-#                 {"error": f"Student with ID {student_id} not found"},
-#                 status=status.HTTP_404_NOT_FOUND
-#             )
-
-#         # Отдельные ключи для основной информации
-#         core_fields = [
-#             'Speciality', 'Group_Name', 'Student_ID', 'Name', 'Age', 'Is_Academic',
-#             'Middle_value_of_sertificate', 'Entry_score', 'Rating_score', 'Diploma_grade'
-#         ]
-
-#         # Соберём информацию
-#         response_data = {
-#             "student_id": student_row["Student_ID"],
-#             "name": student_row["Name"],
-#             "age": int(student_row["Age"]),
-#             "group": student_row["Group_Name"],
-#             "speciality": student_row["Speciality"],
-#             "academic_info": {
-#                 "certificate_score": float(student_row["Middle_value_of_sertificate"]),
-#                 "entry_score": float(student_row["Entry_score"]),
-#                 "rating_score": float(student_row["Rating_score"]),
-#                 "diploma_grade": float(student_row["Diploma_grade"]),
-#                 "is_academic": bool(int(student_row["Is_Academic"]))
-#             },
-#             "subjects": []
-#         }
-
-#         # Отбор предметов: все поля, кроме core_fields
-#         for subject, grade in student_row.items():
-#             if subject not in core_fields:
-#                 if not subjects_filter or subject in subjects_filter:
-#                     response_data["subjects"].append({
-#                         "subject": subject,
-#                         "grade": grade
-#                     })
-
-#         return Response(response_data)
 class StudentAnalyticsViewSet(viewsets.ViewSet):
     """
     ViewSet для получения аналитики студента из предварительно сгенерированного CSV файла.
-    ЗАГЛУШКА: Возвращает фиктивные данные если файл не найден
+    
+    Назначение:
+    - Предоставляет API endpoint для доступа к результатам ML-аналитики
+    - Читает данные из CSV файла, созданного командой 'analytics'
+    - Фильтрует предметы по запросу для оптимизации ответа
+    
+    Входные параметры (query parameters):
+    - student_id (обязательный) - идентификатор студента
+    - subjects (опционально) - список предметов для фильтрации
+    
+    Требования:
+    - Пользователь должен быть аутентифицирован
+    - CSV файл должен быть предварительно сгенерирован через TrainModelViewSet
+    - Файл должен находиться по указанному пути
+    
+    Выходные данные:
+    - Детальная аналитическая информация по студенту
+    - Успеваемость по предметам
+    - Академические показатели
     """
     permission_classes = [IsAuthenticated]
-    queryset = None
-
+    queryset = None  # Не требуется модель
+    
     def get_csv_path(self):
         """
         Возвращает путь к CSV файлу с результатами аналитики.
+        
+        Возвращает:
+        - str: абсолютный или относительный путь к файлу
+        
+        Расположение файла:
+        - 'application/management/predictions_results.csv'
+        - Файл генерируется management command 'analytics'
         """
         return 'application/management/predictions_results.csv'
 
     def read_csv_data(self):
         """
-        Читает данные из CSV или возвращает фиктивные данные
+        Читает и кэширует данные из CSV файла.
+        
+        Возвращает:
+        - list: список словарей с данными из CSV
+        
+        Исключения:
+        - FileNotFoundError: если файл не существует
+        - CSV parsing errors: при проблемах с форматом файла
+        
+        Особенности:
+        - Использует кодировку UTF-8
+        - Разделитель - точка с запятой (;)
+        - Первая строка содержит заголовки
         """
         csv_path = self.get_csv_path()
 
         if not os.path.exists(csv_path):
-            print("Файл не найден, возвращаем фиктивные данные")
-            return self._get_mock_csv_data()
+            raise FileNotFoundError("Analytics file not generated yet")
 
-        try:
-            with open(csv_path, 'r', encoding='utf-8') as f:
-                return list(csv.DictReader(f, delimiter=';'))
-        except Exception as e:
-            print(f"Ошибка чтения CSV: {e}, возвращаем фиктивные данные")
-            return self._get_mock_csv_data()
-
-    def _get_mock_csv_data(self):
-        """
-        Возвращает фиктивные данные CSV
-        """
-        return [
-            {
-                'Student_ID': '495',
-                'Name': 'Иванов Иван Иванович',
-                'Age': '20',
-                'Group_Name': 'ФИТ-21Б',
-                'Speciality': 'Информатика',
-                'Middle_value_of_sertificate': '4.5',
-                'Entry_score': '85.5',
-                'Rating_score': '4.2',
-                'Diploma_grade': '4.7',
-                'Is_Academic': '1',
-                'Математика': '4.8',
-                'Программирование': '5.0',
-                'Физика': '4.5',
-                'Английский язык': '4.2',
-                'Базы данных': '4.9'
-            },
-            {
-                'Student_ID': '496',
-                'Name': 'Петров Петр Петрович',
-                'Age': '21',
-                'Group_Name': 'ФИТ-21А',
-                'Speciality': 'Информатика',
-                'Middle_value_of_sertificate': '4.2',
-                'Entry_score': '82.0',
-                'Rating_score': '4.0',
-                'Diploma_grade': '4.3',
-                'Is_Academic': '0',
-                'Математика': '4.3',
-                'Программирование': '4.7',
-                'Физика': '3.8',
-                'Английский язык': '4.5',
-                'Базы данных': '4.6'
-            }
-        ]
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            return list(csv.DictReader(f, delimiter=';'))  
 
     def list(self, request, *args, **kwargs):
         """
         Обрабатывает GET-запрос для получения аналитики студента.
-        Работает с фиктивными данными если CSV недоступен
+        
+        Входные параметры (query parameters):
+        - student_id: str (обязательный) - ID студента
+        - subjects: list (опционально) - список предметов для фильтрации
+        
+        Выходные данные:
+        - Response: JSON объект со структурой:
+          {
+            "student_id": "12345",
+            "name": "Иванов Иван Иванович",
+            "age": 20,
+            "group": "ФИТ-21Б",
+            "speciality": "Информатика",
+            "academic_info": {
+                "certificate_score": 4.5,
+                "entry_score": 85.5,
+                "rating_score": 4.2,
+                "diploma_grade": 4.7,
+                "is_academic": false
+            },
+            "subjects": [
+                {
+                    "subject": "Математика",
+                    "grade": "4.8"
+                },
+                {
+                    "subject": "Программирование", 
+                    "grade": "5.0"
+                }
+            ]
+          }
+        
+        Коды ответов:
+        - 200: Успешный запрос
+        - 400: Отсутствует обязательный параметр student_id
+        - 404: Файл не найден или студент не найден в файле
+        - 500: Внутренняя ошибка сервера
+        
+        Логика работы:
+        1. Проверка обязательного параметра student_id
+        2. Чтение данных из CSV файла
+        3. Поиск студента по ID
+        4. Формирование структурированного ответа
+        5. Фильтрация предметов по запросу (если указано)
         """
         student_id = request.query_params.get('student_id')
         subjects_filter = request.query_params.getlist('subjects', [])
@@ -1853,19 +1584,17 @@ class StudentAnalyticsViewSet(viewsets.ViewSet):
 
         try:
             csv_data = self.read_csv_data()
-        except Exception as e:
-            return Response(
-                {"error": f"Ошибка загрузки данных: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        except FileNotFoundError as e:
+            return Response({"error": str(e)}, status=status.HTTP_404_NOT_FOUND)
 
         # Найдём строку нужного студента
         student_row = next((row for row in csv_data if row['Student_ID'] == student_id), None)
 
         if not student_row:
-            # Если студент не найден, создаем фиктивного студента
-            print(f"Студент {student_id} не найден, создаем фиктивные данные")
-            student_row = self._create_mock_student_data(student_id)
+            return Response(
+                {"error": f"Student with ID {student_id} not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         # Отдельные ключи для основной информации
         core_fields = [
@@ -1885,92 +1614,18 @@ class StudentAnalyticsViewSet(viewsets.ViewSet):
                 "entry_score": float(student_row["Entry_score"]),
                 "rating_score": float(student_row["Rating_score"]),
                 "diploma_grade": float(student_row["Diploma_grade"]),
-                "is_academic": bool(int(student_row.get("Is_Academic", 0)))
+                "is_academic": bool(int(student_row["Is_Academic"]))
             },
             "subjects": []
         }
 
         # Отбор предметов: все поля, кроме core_fields
         for subject, grade in student_row.items():
-            if subject not in core_fields and grade and grade != '0':
+            if subject not in core_fields:
                 if not subjects_filter or subject in subjects_filter:
                     response_data["subjects"].append({
                         "subject": subject,
                         "grade": grade
                     })
 
-        # Если нет предметов, добавляем фиктивные
-        if not response_data["subjects"]:
-            response_data["subjects"] = self._get_mock_subjects(subjects_filter)
-
         return Response(response_data)
-
-    def _create_mock_student_data(self, student_id):
-        """
-        Создает фиктивные данные для студента
-        """
-        mock_students = {
-            '495': {
-                'Student_ID': '495',
-                'Name': 'Иванов Иван Иванович',
-                'Age': '20',
-                'Group_Name': 'ФИТ-21Б',
-                'Speciality': 'Информатика',
-                'Middle_value_of_sertificate': '4.5',
-                'Entry_score': '85.5',
-                'Rating_score': '4.2',
-                'Diploma_grade': '4.7',
-                'Is_Academic': '1',
-                'Математика': '4.8',
-                'Программирование': '5.0',
-                'Физика': '4.5',
-                'Английский язык': '4.2',
-                'Базы данных': '4.9'
-            },
-            '496': {
-                'Student_ID': '496',
-                'Name': 'Петров Петр Петрович',
-                'Age': '21',
-                'Group_Name': 'ФИТ-21А',
-                'Speciality': 'Информатика',
-                'Middle_value_of_sertificate': '4.2',
-                'Entry_score': '82.0',
-                'Rating_score': '4.0',
-                'Diploma_grade': '4.3',
-                'Is_Academic': '0',
-                'Математика': '4.3',
-                'Программирование': '4.7',
-                'Физика': '3.8',
-                'Английский язык': '4.5',
-                'Базы данных': '4.6'
-            }
-        }
-        
-        return mock_students.get(student_id, {
-            'Student_ID': student_id,
-            'Name': 'Тестовый Студент',
-            'Age': '20',
-            'Group_Name': 'ФИТ-21Т',
-            'Speciality': 'Информатика',
-            'Middle_value_of_sertificate': '4.0',
-            'Entry_score': '80.0',
-            'Rating_score': '4.0',
-            'Diploma_grade': '4.0',
-            'Is_Academic': '0'
-        })
-
-    def _get_mock_subjects(self, subjects_filter):
-        """
-        Возвращает фиктивные предметы
-        """
-        all_subjects = [
-            {"subject": "Математика", "grade": "4.8"},
-            {"subject": "Программирование", "grade": "5.0"},
-            {"subject": "Физика", "grade": "4.5"},
-            {"subject": "Английский язык", "grade": "4.2"},
-            {"subject": "Базы данных", "grade": "4.9"}
-        ]
-        
-        if subjects_filter:
-            return [subj for subj in all_subjects if subj["subject"] in subjects_filter]
-        return all_subjects
