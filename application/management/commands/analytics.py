@@ -10,10 +10,10 @@ from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from keras.models import Sequential
-from keras.layers import Dense
-from keras.optimizers import Adam
-from keras.utils import to_categorical
+# from keras.models import Sequential
+# from keras.layers import Dense
+# from keras.optimizers import Adam
+# from keras.utils import to_categorical
 from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.feature_selection import RFE
 import matplotlib.pyplot as plt
