@@ -17,7 +17,7 @@ from .models import Student, Debts, Group
 
 from itertools import chain
 
-from application.management.commands import analytics
+#from application.management.commands import analytics пока не трогаем аналитику
 
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
