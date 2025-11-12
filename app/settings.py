@@ -25,7 +25,14 @@ SECRET_KEY = 'django-insecure-#m4+b85sq2xkb56pk6s@=u(4-o5macl-_(ad)uus8hbf2+07e-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+#ALLOWED_HOSTS = [] 
+ALLOWED_HOSTS = [ # указала доступные адреса
+    '172.25.4.41',      
+    'localhost',
+    '127.0.0.1',
+    '0.0.0.0',
+]
+
 
 
 # Application definition
@@ -49,7 +56,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    #'django.middleware.csrf.CsrfViewMiddleware', не нужно
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -57,11 +64,20 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
 ]
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8080",  # ! Важно указать именно ваш адрес где находится фронт, иначе не сработает
+#CORS_ALLOWED_ORIGINS = [
+   # "http://localhost:8080",  # ! Важно указать именно ваш адрес где находится фронт, иначе не сработает
+#]
+
+CORS_ALLOWED_ORIGINS = [ # расширила список 
+    "http://172.25.4.41",  
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8080",  
 ]
 
+
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True # добавила
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -108,28 +124,30 @@ WSGI_APPLICATION = 'app.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'mssql',
-#         'NAME': 'IRNTU-Dashboard', 
-#         # 'HOST': '127.0.0.1',
-#         'HOST': 'localhost',
-#         'PORT': '1433',
-#         'OPTIONS': {
-#             'driver': 'ODBC Driver 17 for SQL Server',
-#             'extra_params': 'TrustServerCertificate=yes;',
-#         },
-#     }
-# }
-DATABASES = {
+#DATABASES = {
+#    'default': {
+#        'ENGINE': 'mssql',
+#        'NAME': 'ProjectBD',
+#        'HOST': 'DESKTOP-I76BBVD\SQLKOPIKOU',
+#        'OPTIONS': {
+#            'driver': 'ODBC Driver 17 for SQL Server',
+#            'trusted_connection': 'yes', 
+#            'extra_params': 'TrustServerCertificate=yes;',
+#        },
+#    }
+#}
+
+DATABASES = { # настройки бд для сервера
     'default': {
         'ENGINE': 'mssql',
-        'NAME': 'ProjectBD',
-        'HOST': 'DESKTOP-I76BBVD\SQLKOPIKOU',
-        #'PORT': '1433',
+        'NAME': 'irntu_dashboard',  
+        'HOST': 'localhost',
+        'PORT': '1433',
+        'USER': 'sa',  
+        'PASSWORD': 'sa@654321!',
         'OPTIONS': {
             'driver': 'ODBC Driver 17 for SQL Server',
-            'trusted_connection': 'yes', 
+            'trusted_connection': 'yes',
             'extra_params': 'TrustServerCertificate=yes;',
         },
     }
@@ -171,6 +189,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles') # пути для статичных файлов
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media') # пути для медиа файлов
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
