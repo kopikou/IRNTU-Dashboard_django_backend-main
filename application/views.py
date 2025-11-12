@@ -32,6 +32,10 @@ from app.serializers import AcademSerializer, AttendanceSerializer, CourseProjec
 
 import logging
 
+from django.views.decorators.csrf import csrf_exempt #добавила
+from django.utils.decorators import method_decorator  #добавила
+
+
 logger = logging.getLogger(__name__)
 
 class CheckPermissionsView(APIView):
@@ -55,6 +59,10 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+
+    @method_decorator(csrf_exempt) # добавила
+    def dispatch(self, *args, **kwargs): # добавила
+        return super().dispatch(*args, **kwargs)
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
