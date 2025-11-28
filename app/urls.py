@@ -16,16 +16,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from application.views import (
-    AcademListView, AttendanceListView, CourseProjectsListView, DebtAuditListView, 
-    DebtsListView, DiplomaListView, DisciplesListView, EducationPlanListView, 
-    FormControlListView, GradesListView, GroupListView, HoursPerSemestListView, 
-    NagruzkaListView, PractiseListView, PractiseTypeListView, RatingListView, 
-    RatingTypeListView, SpecialtyListView, StudentListView, TeachersListView,
-    StudentIDView, TeachersIDView, GroupIDView
-)
+from application.views import *
 from application.views import RegisterView, LoginView, CheckPermissionsView # Auth views
-from application.views import AnalyticsView # Analytic view
+#from application.views import AnalyticsView # Analytic view
 
 from rest_framework.routers import DefaultRouter
 
@@ -35,43 +28,80 @@ router = DefaultRouter()
 router.register("statistics/marks", GradesViewset, basename="api-grades")
 router.register("statistics/subject", SubjectStatisticsViewSet, basename="subject")
 router.register("academic/performance", AcademicPerformanceViewSet, basename="performance")
-router.register("academic/returns", AcademicReturnsViewSet, basename="returns")
+#router.register("academic/returns", AcademicReturnsViewSet, basename="returns")
 router.register("student-rating", StudentRatingViewSet, basename="api-rating")
-router.register("statistics/train-model", TrainModelViewSet, basename="ml-train")
-router.register("student-analytics", StudentAnalyticsViewSet, basename="get_analytics")
+#router.register("statistics/train-model", TrainModelViewSet, basename="ml-train")
+#router.register("student-analytics", StudentAnalyticsViewSet, basename="get_analytics")
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api-auth/', include('rest_framework.urls')),
-    path('academ/', AcademListView.as_view(), name='academ-list'),
-    path('attendance/', AttendanceListView.as_view(), name='attendance-list'),
-    path('course-projects/', CourseProjectsListView.as_view(), name='course-projects-list'),
-    path('debt-audit/', DebtAuditListView.as_view(), name='debt-audit-list'),
-    path('debts/', DebtsListView.as_view(), name='debts-list'),
-    path('diploma/', DiplomaListView.as_view(), name='diploma-list'),
-    path('disciples/', DisciplesListView.as_view(), name='disciples-list'),
-    path('education-plan/', EducationPlanListView.as_view(), name='education-plan-list'),
-    path('form-control/', FormControlListView.as_view(), name='form-control-list'),
-    path('grades/', GradesListView.as_view(), name='grades-list'),
-    path('groups/', GroupListView.as_view(), name='group-list'),
-    path('groups/<int:group_id>/', GroupIDView.as_view(), name='group-id'),
-    path('hours-per-semest/', HoursPerSemestListView.as_view(), name='hours-per-semest-list'),
-    path('nagruzka/', NagruzkaListView.as_view(), name='nagruzka-list'),
-    path('practise/', PractiseListView.as_view(), name='practise-list'),
-    path('practise-type/', PractiseTypeListView.as_view(), name='practise-type-list'),
-    path('rating/', RatingListView.as_view(), name='rating-list'),
-    path('rating-type/', RatingTypeListView.as_view(), name='rating-type-list'),
-    path('specialty/', SpecialtyListView.as_view(), name='specialty-list'),
-    path('students/', StudentListView.as_view(), name='student-list'),
-    path('students/<int:student_id>/', StudentIDView.as_view(), name='student-id'),
-    path('teachers/', TeachersListView.as_view(), name='teacher-list'),
-    path('teachers/<int:teacher_id>/', TeachersIDView.as_view(), name='teacher-id'),
+
+    # Факультеты
+    path('api/faculties/', FacultyListView.as_view(), name='faculty-list'),
+    path('api/faculties/<int:faculty_id>/', FacultyIDView.as_view(), name='faculty-id'),
+    
+    # Специальности
+    path('api/specialities/', SpecialityListView.as_view(), name='speciality-list'),
+    path('api/specialities/<int:speciality_id>/', SpecialityIDView.as_view(), name='speciality-id'),
+    
+    # Группы студентов
+    path('api/groups/', StudentGroupListView.as_view(), name='group-list'),
+    path('api/groups/<int:group_id>/', StudentGroupIDView.as_view(), name='group-id'),
+    
+    # Студенты
+    path('api/students/', StudentListView.as_view(), name='student-list'),
+    path('api/students/<int:student_id>/', StudentIDView.as_view(), name='student-id'),
+    
+    # Дисциплины
+    path('api/disciplines/', DisciplineListView.as_view(), name='discipline-list'),
+    path('api/disciplines/<int:discipline_id>/', DisciplineIDView.as_view(), name='discipline-id'),
+    
+    # Типы результатов
+    path('api/result-types/', ResultTypeListView.as_view(), name='result-type-list'),
+    path('api/result-types/<int:result_id>/', ResultTypeIDView.as_view(), name='result-type-id'),
+    
+    # Результаты студентов
+    path('api/student-results/', StudentResultListView.as_view(), name='student-result-list'),
+    path('api/student-results/student/<int:student_id>/', StudentResultByStudentView.as_view(), name='student-result-by-student'),
+    path('api/student-results/discipline/<int:discipline_id>/', StudentResultByDisciplineView.as_view(), name='student-result-by-discipline'),
+
+    # Посещаемость
+    path('api/attendance/', AttendanceListView.as_view(), name='attendance-list'),
+    path('api/attendance/<int:lesson_id>/', AttendanceIDView.as_view(), name='attendance-id'),
+    path('api/attendance/student/<int:student_id>/', AttendanceByStudentView.as_view(), name='attendance-by-student'),
+    path('api/attendance/discipline/<int:discipline_id>/', AttendanceByDisciplineView.as_view(), name='attendance-by-discipline'),
+    path('api/attendance/student/<int:student_id>/discipline/<int:discipline_id>/', AttendanceByStudentDisciplineView.as_view(), name='attendance-by-student-discipline'),
 
     # Auth paths
-    path('register/', RegisterView.as_view(), name='register'),
-    path('login/', LoginView.as_view(), name='login'),
-    path('check-permissions/', CheckPermissionsView.as_view(), name='check-permissions'),
+    path('api/register/', RegisterView.as_view(), name='register'),
+    path('api/login/', LoginView.as_view(), name='login'),
+    path('api/check-permissions/', CheckPermissionsView.as_view(), name='check-permissions'),
     # Analytics paths
-    path('analyze/', AnalyticsView.as_view(), name='analyze'),
+    #path('analyze/', AnalyticsView.as_view(), name='analyze'),
 ]
+
+   # path('academ/', AcademListView.as_view(), name='academ-list'),
+    # path('attendance/', AttendanceListView.as_view(), name='attendance-list'),
+    # path('course-projects/', CourseProjectsListView.as_view(), name='course-projects-list'),
+    # path('debt-audit/', DebtAuditListView.as_view(), name='debt-audit-list'),
+    # path('debts/', DebtsListView.as_view(), name='debts-list'),
+    # path('diploma/', DiplomaListView.as_view(), name='diploma-list'),
+    # path('disciples/', DisciplesListView.as_view(), name='disciples-list'),
+    # path('education-plan/', EducationPlanListView.as_view(), name='education-plan-list'),
+    # path('form-control/', FormControlListView.as_view(), name='form-control-list'),
+    # path('grades/', GradesListView.as_view(), name='grades-list'),
+    # path('groups/', GroupListView.as_view(), name='group-list'),
+    # path('groups/<int:group_id>/', GroupIDView.as_view(), name='group-id'),
+    # path('hours-per-semest/', HoursPerSemestListView.as_view(), name='hours-per-semest-list'),
+    # path('nagruzka/', NagruzkaListView.as_view(), name='nagruzka-list'),
+    # path('practise/', PractiseListView.as_view(), name='practise-list'),
+    # path('practise-type/', PractiseTypeListView.as_view(), name='practise-type-list'),
+    # path('rating/', RatingListView.as_view(), name='rating-list'),
+    # path('rating-type/', RatingTypeListView.as_view(), name='rating-type-list'),
+    # path('specialty/', SpecialtyListView.as_view(), name='specialty-list'),
+    # path('students/', StudentListView.as_view(), name='student-list'),
+    # path('students/<int:student_id>/', StudentIDView.as_view(), name='student-id'),
+    # path('teachers/', TeachersListView.as_view(), name='teacher-list'),
+    # path('teachers/<int:teacher_id>/', TeachersIDView.as_view(), name='teacher-id'),

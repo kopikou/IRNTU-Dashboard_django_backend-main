@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 from datetime import timedelta
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -124,7 +124,7 @@ WSGI_APPLICATION = 'app.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-#DATABASES = {
+# DATABASES = {
 #    'default': {
 #        'ENGINE': 'mssql',
 #        'NAME': 'ProjectBD',
@@ -135,23 +135,34 @@ WSGI_APPLICATION = 'app.wsgi.application'
 #            'extra_params': 'TrustServerCertificate=yes;',
 #        },
 #    }
-#}
+# }
 
-DATABASES = { # настройки бд для сервера
+DATABASES = {
     'default': {
-        'ENGINE': 'mssql',
-        'NAME': 'irntu_dashboard',  
+        'ENGINE': 'django.db.backends.postgresql_psycopg2',
+        'NAME': 'project_db',
+        'USER': 'postgres',
+        'PASSWORD': '12345',
         'HOST': 'localhost',
-        'PORT': '1433',
-        'USER': 'sa',  
-        'PASSWORD': 'sa@654321!',
-        'OPTIONS': {
-            'driver': 'ODBC Driver 17 for SQL Server',
-            'trusted_connection': 'yes',
-            'extra_params': 'TrustServerCertificate=yes;',
-        },
-    }
+        'PORT': '5432',
+    },
 }
+
+# DATABASES = { # настройки бд для сервера
+#     'default': {
+#         'ENGINE': 'mssql',
+#         'NAME': 'irntu_dashboard',  
+#         'HOST': 'localhost',
+#         'PORT': '1433',
+#         'USER': 'sa',  
+#         'PASSWORD': 'sa@654321!',
+#         'OPTIONS': {
+#             'driver': 'ODBC Driver 17 for SQL Server',
+#             'trusted_connection': 'yes',
+#             'extra_params': 'TrustServerCertificate=yes;',
+#         },
+#     }
+# }
 
 
 # Password validation
