@@ -30,3 +30,8 @@ python manage.py migrate
 ```
 python manage.py runserver
 ```
+
+### Запуск тестов:
+```
+pytest application/tests.py -v
+```
