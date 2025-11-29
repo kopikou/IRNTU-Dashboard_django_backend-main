@@ -143,7 +143,7 @@ DATABASES = {
         'NAME': 'project_db',
         'USER': 'postgres',
         'PASSWORD': '12345',
-        'HOST': '172.17.0.1', #'localhost',
+        'HOST': '172.17.0.1', #'localhost', # заменила
         'PORT': '5432',
     },
 }
