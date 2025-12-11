@@ -21,7 +21,6 @@ matplotlib == 3.9.2
 #django-mssql-backend==2.8.1
 #pyodbc==5.2.0
 #mssql-django==1.5
-#абобус
 
 psycopg2-binary==2.9.9 # добавила
 
