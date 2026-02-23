@@ -27,3 +27,5 @@ psycopg2-binary==2.9.9 # добавила
 
 pytest==8.4.2
 pytest-django==4.11.1
+
+model-bakery==1.23.2

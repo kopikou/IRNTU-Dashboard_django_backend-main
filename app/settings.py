@@ -47,7 +47,7 @@ INSTALLED_APPS = [
     'corsheaders',
 
     'application',
-    
+    'django_filters',
     'rest_framework',
     'rest_framework_simplejwt',
 ]
@@ -127,7 +127,7 @@ WSGI_APPLICATION = 'app.wsgi.application'
 # DATABASES = {
 #    'default': {
 #        'ENGINE': 'mssql',
-#        'NAME': 'ProjectBD',
+#        'NAME': 'ProjectDB',
 #        'HOST': 'DESKTOP-I76BBVD\SQLKOPIKOU',
 #        'OPTIONS': {
 #            'driver': 'ODBC Driver 17 for SQL Server',
@@ -143,7 +143,7 @@ DATABASES = {
         'NAME': 'project_db',
         'USER': 'postgres',
         'PASSWORD': '12345',
-        'HOST': '172.17.0.1', #'localhost', # заменила
+        'HOST': 'localhost',#'172.17.0.1', #'localhost', # заменила
         'PORT': '5432',
     },
 }
@@ -223,8 +223,11 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
-        'rest_framework.renderers.BrowsableAPIRenderer',  # ! Включает интерфейс DRF
+        'rest_framework.renderers.BrowsableAPIRenderer', 
     ),
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend'
+    ],
 }
 
 SIMPLE_JWT = {

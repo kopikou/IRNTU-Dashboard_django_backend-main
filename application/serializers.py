@@ -126,8 +126,6 @@ from application.models import (
     Faculty, Speciality, StudentGroup, Student, 
     Discipline, ResultType, StudentResult, Attendance
 )
-from django.contrib.auth import get_user_model
-
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()

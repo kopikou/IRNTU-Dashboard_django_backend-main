@@ -406,40 +406,25 @@
 
 #         except Exception as e:
 #             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-# views.py
-from django.shortcuts import render
-from rest_framework.generics import DestroyAPIView, ListAPIView, get_object_or_404
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.response import Response
+
+from rest_framework import viewsets
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-import pandas as pd
+from django_filters.rest_framework import DjangoFilterBackend
 from .permissions import IsStaffOrSuperUser
 from .models import (
-    Administrator, Faculty, Speciality, StudentGroup, 
-    Student, Discipline, ResultType, StudentResult, Attendance
+    Faculty, Speciality, StudentGroup, Student,
+    Discipline, ResultType, StudentResult, Attendance, Administrator
 )
-from app.serializers import (
+from .serializers import (
     LoginSerializer, RegisterSerializer,
     FacultySerializer, SpecialitySerializer, StudentGroupSerializer,
-    StudentSerializer, DisciplineSerializer, ResultTypeSerializer, 
+    StudentSerializer, DisciplineSerializer, ResultTypeSerializer,
     StudentResultSerializer, AttendanceSerializer
 )
-
-import logging
-logger = logging.getLogger(__name__)
-
-class CheckPermissionsView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        return Response({
-            "permissions": list(request.user.get_all_permissions())
-        })
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
@@ -451,218 +436,104 @@ class RegisterView(APIView):
             return Response({'message': 'Administrator created successfully!'}, status=201)
         return Response(serializer.errors, status=400)
 
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
-            user = authenticate(email=serializer.validated_data['email'], password=serializer.validated_data['password'])
+            user = authenticate(
+                email=serializer.validated_data['email'],
+                password=serializer.validated_data['password']
+            )
             if user:
                 refresh = RefreshToken.for_user(user)
                 access_token = str(refresh.access_token)
-
                 response = Response({
                     'refresh': str(refresh),
                     'access': access_token
                 })
                 response.set_cookie(
-                    key="access_token", 
-                    value=access_token, 
+                    key="access_token",
+                    value=access_token,
                     httponly=True,
                     samesite='Lax',
                     secure=False
                 )
                 return response
-
             return Response({"error": "Неверные данные"}, status=401)
         return Response(serializer.errors, status=400)
 
-class HelloWorldAPIView(APIView):
+
+class CheckPermissionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def get(self, request):
-        return Response({"message": "Hello, World!"})
+        return Response({
+            "permissions": list(request.user.get_all_permissions())
+        })
 
-#######################################################################################################
-# API Views для новых моделей
-
-class FacultyListView(APIView):
+#ViewSets для справочников (только чтение)
+class FacultyViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Faculty.objects.all()
+    serializer_class = FacultySerializer
     permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        faculties = Faculty.objects.all()
-        serializer = FacultySerializer(faculties, many=True)
-        return Response(serializer.data)
+    lookup_field = 'faculty_id'
 
-class FacultyIDView(APIView):
+
+class SpecialityViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Speciality.objects.select_related('faculty').all()
+    serializer_class = SpecialitySerializer
     permission_classes = [IsStaffOrSuperUser]
+    lookup_field = 'speciality_id'
 
-    def get(self, request, faculty_id):
-        faculty = get_object_or_404(Faculty, faculty_id=faculty_id)
-        serializer = FacultySerializer(faculty)
-        return Response(serializer.data)
 
-class SpecialityListView(APIView):
+class StudentGroupViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = StudentGroup.objects.select_related('speciality__faculty').all()
+    serializer_class = StudentGroupSerializer
     permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        specialities = Speciality.objects.all()
-        serializer = SpecialitySerializer(specialities, many=True)
-        return Response(serializer.data)
+    lookup_field = 'group_id'
 
-class SpecialityIDView(APIView):
+
+class StudentViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Student.objects.select_related('group__speciality__faculty').all()
+    serializer_class = StudentSerializer
     permission_classes = [IsStaffOrSuperUser]
+    lookup_field = 'student_id'
 
-    def get(self, request, speciality_id):
-        speciality = get_object_or_404(Speciality, speciality_id=speciality_id)
-        serializer = SpecialitySerializer(speciality)
-        return Response(serializer.data)
 
-class StudentGroupListView(APIView):
+class DisciplineViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Discipline.objects.all()
+    serializer_class = DisciplineSerializer
     permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        groups = StudentGroup.objects.all()
-        serializer = StudentGroupSerializer(groups, many=True)
-        return Response(serializer.data)
+    lookup_field = 'discipline_id'
 
-class StudentGroupIDView(APIView):
+
+class ResultTypeViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ResultType.objects.all()
+    serializer_class = ResultTypeSerializer
     permission_classes = [IsStaffOrSuperUser]
+    lookup_field = 'result_id'
 
-    def get(self, request, group_id):
-        group = get_object_or_404(StudentGroup, group_id=group_id)
-        serializer = StudentGroupSerializer(group)
-        return Response(serializer.data)
-
-class StudentListView(APIView):
+class StudentResultViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = StudentResult.objects.select_related(
+        'student__group__speciality__faculty',
+        'discipline',
+        'result'
+    ).all()
+    serializer_class = StudentResultSerializer
     permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        students = Student.objects.all()
-        serializer = StudentSerializer(students, many=True)
-        return Response(serializer.data)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['student', 'discipline']
 
-class StudentIDView(APIView):
+
+class AttendanceViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Attendance.objects.select_related(
+        'student__group__speciality__faculty',
+        'discipline'
+    ).all()
+    serializer_class = AttendanceSerializer
     permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, student_id):
-        student = get_object_or_404(Student, student_id=student_id)
-        serializer = StudentSerializer(student)
-        return Response(serializer.data)
-
-class DisciplineListView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        disciplines = Discipline.objects.all()
-        serializer = DisciplineSerializer(disciplines, many=True)
-        return Response(serializer.data)
-
-class DisciplineIDView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, discipline_id):
-        discipline = get_object_or_404(Discipline, discipline_id=discipline_id)
-        serializer = DisciplineSerializer(discipline)
-        return Response(serializer.data)
-
-class ResultTypeListView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        result_types = ResultType.objects.all()
-        serializer = ResultTypeSerializer(result_types, many=True)
-        return Response(serializer.data)
-
-class ResultTypeIDView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, result_id):
-        result_type = get_object_or_404(ResultType, result_id=result_id)
-        serializer = ResultTypeSerializer(result_type)
-        return Response(serializer.data)
-
-class StudentResultListView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        student_results = StudentResult.objects.all()
-        serializer = StudentResultSerializer(student_results, many=True)
-        return Response(serializer.data)
-
-class StudentResultByStudentView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, student_id):
-        student_results = StudentResult.objects.filter(student_id=student_id)
-        serializer = StudentResultSerializer(student_results, many=True)
-        return Response(serializer.data)
-
-class StudentResultByDisciplineView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, discipline_id):
-        student_results = StudentResult.objects.filter(discipline_id=discipline_id)
-        serializer = StudentResultSerializer(student_results, many=True)
-        return Response(serializer.data)
-
-class AttendanceListView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-    
-    def get(self, request):
-        """
-        Получить все записи о посещаемости
-        """
-        attendance = Attendance.objects.all()
-        serializer = AttendanceSerializer(attendance, many=True)
-        return Response(serializer.data)
-
-class AttendanceIDView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, lesson_id):
-        """
-        Получить запись о посещаемости по ID занятия
-        """
-        attendance = get_object_or_404(Attendance, lesson_id=lesson_id)
-        serializer = AttendanceSerializer(attendance)
-        return Response(serializer.data)
-
-class AttendanceByStudentView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, student_id):
-        """
-        Получить посещаемость конкретного студента
-        """
-        attendance = Attendance.objects.filter(student_id=student_id)
-        serializer = AttendanceSerializer(attendance, many=True)
-        return Response(serializer.data)
-
-class AttendanceByDisciplineView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, discipline_id):
-        """
-        Получить посещаемость по конкретной дисциплине
-        """
-        attendance = Attendance.objects.filter(discipline_id=discipline_id)
-        serializer = AttendanceSerializer(attendance, many=True)
-        return Response(serializer.data)
-
-class AttendanceByStudentDisciplineView(APIView):
-    permission_classes = [IsStaffOrSuperUser]
-
-    def get(self, request, student_id, discipline_id):
-        """
-        Получить посещаемость студента по конкретной дисциплине
-        """
-        attendance = Attendance.objects.filter(
-            student_id=student_id, 
-            discipline_id=discipline_id
-        )
-        serializer = AttendanceSerializer(attendance, many=True)
-        return Response(serializer.data)
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['student', 'discipline', 'lesson_id']
