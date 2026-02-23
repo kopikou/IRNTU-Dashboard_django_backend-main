@@ -462,8 +462,8 @@ class StudentResult(models.Model):
 class Attendance(models.Model):
     lesson_id = models.IntegerField(verbose_name="ID занятия",primary_key=True)
     student = models.ForeignKey(Student, on_delete=models.CASCADE, verbose_name="Студент")
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="Дата обновления")
+    created_at = models.DateTimeField(verbose_name="Дата создания")
+    updated_at = models.DateTimeField(verbose_name="Дата обновления")
     user_id = models.IntegerField(verbose_name="ID пользователя")
     discipline = models.ForeignKey(Discipline, on_delete=models.CASCADE, verbose_name="Дисциплина")
 
