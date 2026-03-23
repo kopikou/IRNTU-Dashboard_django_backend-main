@@ -5,8 +5,34 @@ from application.models import Student, StudentResult, Attendance
 
 
 class StudentRatingService:
+    """
+    Сервис для комплексной оценки успеваемости и поведения студентов.
+    
+    Предоставляет методы для:
+    - Определения курса обучения на основе года поступления и текущей даты.
+    - Расчета относительного процента посещаемости (относительно лидера группы).
+    - Вычисления интегрального показателя активности студента.
+    - Оценки риска отчисления на основе оценок, посещаемости и долгов.
+    - Формирования рейтинговых списков студентов с детальной аналитикой.
+    
+    Все расчеты производятся динамически на основе данных из БД.
+    """
     @staticmethod
     def calculate_course(year_of_admission: int) -> int:
+        """
+        Вычисляет текущий курс студента на основе года поступления.
+        
+        Логика:
+        - Учебный год начинается 1 сентября.
+        - Если текущий месяц < 9 (январь-август), курс = текущий год - год поступления.
+        - Если текущий месяц >= 9 (сентябрь-декабрь), курс увеличивается на 1.
+        
+        Args:
+            year_of_admission (int): Год поступления студента (например, 2023).
+            
+        Returns:
+            int: Номер текущего курса (1, 2, 3, ...).
+        """
         now = datetime.now()
         current_year = now.year
         current_month = now.month
@@ -17,6 +43,17 @@ class StudentRatingService:
 
     @staticmethod
     def extract_year_from_group_name(name: str) -> Optional[int]:
+        """
+        Извлекает год поступления из названия учебной группы.
+        
+        Ожидает формат названия вида "Название-ГГ" (например, "КСм-23", "АСУб-21").
+        
+        Args:
+            name (str): Название группы.
+            
+        Returns:
+            Optional[int]: Полный год поступления (например, 2023) или None, если формат неверен.
+        """
         try:
             parts = name.split('-')
             if len(parts) < 2:
@@ -31,6 +68,18 @@ class StudentRatingService:
 
     @staticmethod
     def normalize_grade_value(result_value: str) -> Optional[int]:
+        """
+        Преобразует строковое значение оценки в целое число.
+        
+        Обрабатывает только числовые оценки ("2", "3", "4", "5").
+        Возвращает None для зачетов, неявок и других нечисловых значений.
+        
+        Args:
+            result_value (str): Строковое значение оценки из БД.
+            
+        Returns:
+            Optional[int]: Числовое значение оценки или None.
+        """
         if not result_value:
             return None
         grade_clean = result_value.strip()
@@ -40,7 +89,17 @@ class StudentRatingService:
     
     @classmethod
     def get_max_attendance_in_group(cls, student: Student) -> int:
-        """Находит максимальное количество посещений среди всех студентов в группе данного студента."""
+        """
+        Находит максимальное количество посещений среди всех студентов в группе данного студента.
+        
+        Используется как эталон (100%) для расчета относительной посещаемости.
+        
+        Args:
+            student (Student): Объект студента, для группы которого ищется максимум.
+            
+        Returns:
+            int: Максимальное количество посещенных занятий в группе.
+        """
         if not student.group:
             return 0
         
@@ -60,8 +119,19 @@ class StudentRatingService:
     @classmethod
     def calculate_attendance_percent(cls, student_id: int) -> float:
         """
-        Рассчитывает процент посещаемости относительно самого активного студента в группе.
-        Формула: (посещения студента / макс. посещения в группе) * 100
+        Рассчитывает процент посещаемости студента относительно самого активного студента в группе.
+        
+        Формула:
+            (Посещения студента / Макс. посещения в группе) * 100
+        
+        Это позволяет оценивать активность студента внутри его коллектива без знания 
+        общего количества запланированных пар.
+        
+        Args:
+            student_id (int): ID студента.
+            
+        Returns:
+            float: Процент посещаемости (0.0 - 100.0).
         """
         try:
             student = Student.objects.select_related('group').get(student_id=student_id)
@@ -84,11 +154,21 @@ class StudentRatingService:
     @classmethod
     def calculate_student_activity(cls, student_id: int) -> float:
         """
-        Рассчитывает интегральный показатель активности (0.0 - 5.0).
-        Учитывает:
-        1. Средний балл (вес 50%)
-        2. Относительную посещаемость (вес 30%)
-        3. Отсутствие долгов (вес 20% - бонус, если долгов нет)
+        Рассчитывает интегральный показатель активности студента по шкале от 0.0 до 5.0.
+        
+        Компоненты расчета:
+        1. Успеваемость (вес 50%): Нормализованный средний балл.
+        2. Посещаемость (вес 30%): Относительный процент посещаемости.
+        3. Отсутствие долгов (вес 20%): Бонус начисляется, если у студента нет оценок "2", "Н/Я", "Не зачтено".
+        
+        Формула:
+            Activity = (GradeScore * 0.5) + (AttendanceScore * 0.3) + (DebtBonus * 1.0)
+        
+        Args:
+            student_id (int): ID студента.
+            
+        Returns:
+            float: Показатель активности (0.0 - 5.0).
         """
         try:
             student = Student.objects.select_related('group').get(student_id=student_id)
@@ -133,13 +213,26 @@ class StudentRatingService:
     @classmethod
     def calculate_dropout_risk(cls, student_id: int, avg_grade: float, attendance_percent: float, activity: float) -> float:
         """
-        Рассчитывает риск отчисления (0.0 - 1.0).
-        Чем выше значение, тем выше риск.
+        Рассчитывает вероятность отчисления студента (Risk Score) в диапазоне от 0.0 до 1.0.
         
-        Факторы:
-        1. Низкий средний балл (критично если < 3.0)
-        2. Низкая посещаемость (критично если < 50% от лидера)
-        3. Наличие долгов (резко повышает риск)
+        Факторы риска:
+        1. Низкий средний балл (критический порог < 3.0).
+        2. Низкая посещаемость (критический порог < 50% от лидера).
+        3. Наличие академических задолженностей (наибольший вес).
+        
+        Весовые коэффициенты:
+        - Долги: 50%
+        - Оценки: 30%
+        - Посещаемость: 20%
+        
+        Args:
+            student_id (int): ID студента.
+            avg_grade (float): Средний балл студента.
+            attendance_percent (float): Процент посещаемости.
+            activity (float): Показатель активности (используется косвенно или для логирования).
+            
+        Returns:
+            float: Уровень риска (0.0 - низкий, 1.0 - критический).
         """
         # Подсчет долгов
         debt_count = StudentResult.objects.filter(
@@ -164,7 +257,7 @@ class StudentRatingService:
         elif attendance_percent >= 50:
             attendance_risk = ((80 - attendance_percent) / 30.0) * 0.2
         else:
-            attendance_risk = 0.2 + ((50 - attendance_percent) / 50.0) * 0.3 # До 0.5
+            attendance_risk = 0.2 + ((50 - attendance_percent) / 50.0) * 0.3 
 
         # Компонент риска по долгам (самый весомый)
         debt_risk = min(debt_count * 0.25, 1.0) # 4 долга = 100% риск
@@ -177,6 +270,23 @@ class StudentRatingService:
 
     @classmethod
     def get_student_debts_details(cls, student_id: int) -> List[Dict[str, str]]:
+        """
+        Получает детальную информацию об академических задолженностях студента.
+        
+        Args:
+            student_id (int): ID студента.
+            
+        Returns:
+            List[Dict]: Список словарей с информацией о каждом долге:
+                [
+                    {
+                        "discipline": "Название предмета",
+                        "grade": "Оценка (2/Н/Я/Не зачтено)",
+                        "type": "Тип долга (неуд/неявка/незачет)"
+                    },
+                    ...
+                ]
+        """
         debts = StudentResult.objects.filter(
             student_id=student_id,
             result__result_value__in=['2', 'Н/Я', 'Не зачтено']
@@ -192,6 +302,15 @@ class StudentRatingService:
 
     @staticmethod
     def classify_debt_type(grade_value: str) -> str:
+        """
+        Классифицирует тип задолженности по строковому значению оценки.
+        
+        Args:
+            grade_value (str): Значение оценки.
+            
+        Returns:
+            str: Человекочитаемый тип долга ('неуд', 'неявка', 'незачет', 'другой').
+        """
         if grade_value == '2':
             return 'неуд'
         elif grade_value == 'Н/Я':
@@ -202,6 +321,15 @@ class StudentRatingService:
 
     @staticmethod
     def get_risk_level(risk_score: float) -> str:
+        """
+        Преобразует числовой показатель риска в текстовый уровень.
+        
+        Args:
+            risk_score (float): Числовой риск (0.0 - 1.0).
+            
+        Returns:
+            str: Уровень риска ("низкий", "средний", "высокий").
+        """
         if risk_score < 0.3:
             return "низкий"
         elif risk_score < 0.7:
@@ -211,6 +339,18 @@ class StudentRatingService:
 
     @classmethod
     def get_students_in_course(cls, course: int) -> List[int]:
+        """
+        Возвращает список ID студентов, обучающихся на указанном курсе.
+        
+        Использует логику определения года поступления из названия группы.
+        Исключает студентов в академическом отпуске.
+        
+        Args:
+            course (int): Номер курса.
+            
+        Returns:
+            List[int]: Список идентификаторов студентов.
+        """
         student_ids = []
         students = Student.objects.select_related('group').filter(is_academic=False)
         for student in students:
@@ -231,6 +371,31 @@ class StudentRatingService:
         sort_by: str = 'rating',
         limit: int = 10
     ) -> Dict[str, Any]:
+        """
+        Основной метод сервиса. Формирует рейтинговый список студентов с полной аналитикой.
+        
+        Выполняет следующие шаги:
+        1. Фильтрация студентов по курсу, группе или предмету.
+        2. Расчет метрик для каждого студента (средний балл, активность, посещаемость).
+        3. Вычисление композитного рейтинга.
+        4. Сортировка и ограничение выборки (limit).
+        5. Расчет риска отчисления и детализация долгов для топ-N студентов.
+        6. Формирование ответа для графиков и таблиц.
+        
+        Args:
+            course (int, optional): Фильтр по номеру курса.
+            group (str, optional): Фильтр по названию группы.
+            subject (str, optional): Фильтр по предмету (включает студентов, у которых есть оценка по этому предмету).
+            sort_by (str): Критерий сортировки ('rating', 'performance', 'attendance', 'activity').
+            limit (int): Максимальное количество возвращаемых записей.
+            
+        Returns:
+            Dict[str, Any]: Структурированные данные:
+                {
+                    "chartData": [ ... ], # Данные для графиков
+                    "students": [ ... ]   # Детальные данные для таблицы
+                }
+        """
         qs = Student.objects.select_related('group').filter(is_academic=False)
 
         # Фильтр по группе

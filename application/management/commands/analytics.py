@@ -1,39 +1,15 @@
-from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
-import seaborn as sns
-from matplotlib.pyplot import figure
-import matplotlib.mlab as mlab
-import matplotlib
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.metrics import confusion_matrix, classification_report
-from sklearn.tree import DecisionTreeClassifier, plot_tree
-import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-# from keras.models import Sequential
-# from keras.layers import Dense
-# from keras.optimizers import Adam
-# from keras.utils import to_categorical
-from sklearn.feature_selection import SelectKBest, chi2
-from sklearn.feature_selection import RFE
-import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.feature_selection import RFE
-from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics import silhouette_score
-
 from django.db import connection
-
 from django.core.management.base import BaseCommand
-import os
-import csv
 from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances
-
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import make_pipeline
 from sklearn.compose import ColumnTransformer
-
+############ СТАРАЯ АНАЛИТИКА, УЖЕ НЕ ИСПОЛЬЗУЕТСЯ
 def parse_subject_grades(grade_str):
     import pandas as pd
     if pd.isna(grade_str):

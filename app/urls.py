@@ -36,7 +36,6 @@ router.register(r'result-types', ResultTypeViewSet, basename='result-type')
 router.register(r'student-results', StudentResultViewSet, basename='student-result')
 router.register(r'attendance', AttendanceViewSet, basename='attendance')
 
-
 router.register("statistics/marks", GradesViewset, basename="api-grades")
 router.register("statistics/subject", SubjectStatisticsViewSet, basename="subject")
 router.register("academic/performance", AcademicPerformanceViewSet, basename="performance")
@@ -52,48 +51,10 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api-auth/', include('rest_framework.urls')),
 
-    # # Факультеты
-    # path('api/faculties/', FacultyListView.as_view(), name='faculty-list'),
-    # path('api/faculties/<int:faculty_id>/', FacultyIDView.as_view(), name='faculty-id'),
-    
-    # # Специальности
-    # path('api/specialities/', SpecialityListView.as_view(), name='speciality-list'),
-    # path('api/specialities/<int:speciality_id>/', SpecialityIDView.as_view(), name='speciality-id'),
-    
-    # # Группы студентов
-    # path('api/groups/', StudentGroupListView.as_view(), name='group-list'),
-    # path('api/groups/<int:group_id>/', StudentGroupIDView.as_view(), name='group-id'),
-    
-    # # Студенты
-    # path('api/students/', StudentListView.as_view(), name='student-list'),
-    # path('api/students/<int:student_id>/', StudentIDView.as_view(), name='student-id'),
-    
-    # # Дисциплины
-    # path('api/disciplines/', DisciplineListView.as_view(), name='discipline-list'),
-    # path('api/disciplines/<int:discipline_id>/', DisciplineIDView.as_view(), name='discipline-id'),
-    
-    # # Типы результатов
-    # path('api/result-types/', ResultTypeListView.as_view(), name='result-type-list'),
-    # path('api/result-types/<int:result_id>/', ResultTypeIDView.as_view(), name='result-type-id'),
-    
-    # # Результаты студентов
-    # path('api/student-results/', StudentResultListView.as_view(), name='student-result-list'),
-    # path('api/student-results/student/<int:student_id>/', StudentResultByStudentView.as_view(), name='student-result-by-student'),
-    # path('api/student-results/discipline/<int:discipline_id>/', StudentResultByDisciplineView.as_view(), name='student-result-by-discipline'),
-
-    # # Посещаемость
-    # path('api/attendance/', AttendanceListView.as_view(), name='attendance-list'),
-    # path('api/attendance/<int:lesson_id>/', AttendanceIDView.as_view(), name='attendance-id'),
-    # path('api/attendance/student/<int:student_id>/', AttendanceByStudentView.as_view(), name='attendance-by-student'),
-    # path('api/attendance/discipline/<int:discipline_id>/', AttendanceByDisciplineView.as_view(), name='attendance-by-discipline'),
-    # path('api/attendance/student/<int:student_id>/discipline/<int:discipline_id>/', AttendanceByStudentDisciplineView.as_view(), name='attendance-by-student-discipline'),
-
     # Auth paths
     path('api/register/', RegisterView.as_view(), name='register'),
     path('api/login/', LoginView.as_view(), name='login'),
     path('api/check-permissions/', CheckPermissionsView.as_view(), name='check-permissions'),
-    # Analytics paths
-    #path('analyze/', AnalyticsView.as_view(), name='analyze'),
 ]
 
    # path('academ/', AcademListView.as_view(), name='academ-list'),

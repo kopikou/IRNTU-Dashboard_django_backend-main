@@ -9,8 +9,36 @@ from application.utils.student_utils import (
 )
 
 class GradeStatisticsService:
+    """
+    Сервис для сбора и агрегации статистики успеваемости студентов.
+    
+    Предоставляет методы для:
+    - Нормализации строковых значений оценок.
+    - Фильтрации студентов по курсу с учетом года поступления и статуса обучения.
+    - Агрегации данных об оценках по студентам, предметам и общей выборке.
+    - Формирования сводной статистики (средний балл, распределение оценок).
+    
+    Возвращает структурированные данные, готовые для отображения в дашбордах аналитики.
+    """
     @staticmethod
     def normalize_grade(grade_value: str) -> str:
+        """
+        Нормализует строковое значение оценки к стандартному формату.
+        
+        Преобразует различные варианты написания оценок в единый набор ключей:
+        - "2", "3", "4", "5" -> остаются без изменений.
+        - "Зачтено" -> "зачет"
+        - "Не зачтено" -> "незачет"
+        - "Н/Я" -> "неявка"
+        - Пустые значения -> "Не указано"
+        - Любые другие значения -> возвращаются как есть.
+        
+        Args:
+            grade_value (str): Исходное строковое значение оценки из БД.
+            
+        Returns:
+            str: Нормализованное значение оценки.
+        """
         if not grade_value:
             return "Не указано"
         grade_clean = grade_value.strip()
@@ -25,8 +53,22 @@ class GradeStatisticsService:
         return grade_clean
 
     @staticmethod
-    def _get_student_ids_by_course(course: int) -> Set[int]:
-        """Возвращает set ID студентов, обучающихся на указанном курсе."""
+    def get_student_ids_by_course(course: int) -> Set[int]:
+        """
+        Возвращает множество (set) ID студентов, обучающихся на указанном курсе.
+        
+        Логика определения курса:
+        1. Извлекает год поступления из названия группы (например, "КСм-21" -> 2021).
+        2. Проверяет, продолжает ли студент обучение (student_is_still_enrolled).
+        3. Вычисляет текущий курс на основе года поступления и текущей даты.
+        4. Включает студента в выборку, если рассчитанный курс совпадает с запрошенным.
+        
+        Args:
+            course (int): Номер курса (1, 2, 3, ...).
+            
+        Returns:
+            Set[int]: Множество уникальных идентификаторов студентов (student_id).
+        """
         student_ids = set()
 
         students = Student.objects.filter(
@@ -51,12 +93,60 @@ class GradeStatisticsService:
         group: Optional[str] = None,
         subject: Optional[str] = None
     ) -> dict:
+        """
+        Основной метод сервиса. Собирает полную статистику успеваемости с фильтрацией.
+        
+        Выполняет следующие шаги:
+        1. Формирует фильтр QuerySet на основе параметров (курс, группа).
+        2. Загружает результаты успеваемости (StudentResult) с оптимизированными JOIN'ами.
+        3. Итерируется по результатам, нормализуя оценки и группируя данные по студентам и предметам.
+        4. Подсчитывает общую статистику (количество оценок каждого типа, средний балл).
+        5. Формирует итоговый словарь с тремя секциями: summary, students, subjects.
+        
+        Args:
+            course (int, optional): Фильтр по номеру курса.
+            group (str, optional): Фильтр по названию группы.
+            subject (str, optional): Фильтр по названию дисциплины.
+            
+        Returns:
+            dict: Структурированные данные:
+                {
+                    "summary": {
+                        "totalStudents": int,
+                        "averageGrade": float|null,
+                        "minGrade": int|null,
+                        "maxGrade": int|null,
+                        "countGrade2": int,
+                        "countGrade3": int,
+                        "countGrade4": int,
+                        "countGrade5": int,
+                        "countZachet": int,
+                        "countNejavka": int,
+                        "countNezachet": int
+                    },
+                    "students": [
+                        {
+                            "id": int,
+                            "group": str,
+                            "course": int|null,
+                            "subjects": [
+                                {"subject": str, "grades": [str, ...]}
+                            ]
+                        },
+                        ...
+                    ],
+                    "subjects": [
+                        {"id": int, "name": str},
+                        ...
+                    ]
+                }
+        """
         # Фильтрация студентов по курсу
         student_filter = Q(student__is_academic=False)
         if group:
             student_filter &= Q(student__group__name=group)
         if course is not None:
-            valid_student_ids = cls._get_student_ids_by_course(course)
+            valid_student_ids = cls.get_student_ids_by_course(course)
             if not valid_student_ids:
                 # Нет студентов на этом курсе
                 return {
@@ -175,6 +265,16 @@ class GradeStatisticsService:
 
     @staticmethod
     def update_grade_stats(stats: dict, normalized_grade: str):
+        """
+        Обновляет счетчики статистики на основе нормализованной оценки.
+        
+        Добавляет числовые оценки в список для расчета среднего/мин/макс,
+        а также инкрементирует соответствующие счетчики типов оценок.
+        
+        Args:
+            stats (dict): Словарь со счетчиками и списком числовых оценок.
+            normalized_grade (str): Нормализованное значение оценки ("2"-"5", "зачет", etc).
+        """
         if normalized_grade in ["2", "3", "4", "5"]:
             grade_int = int(normalized_grade)
             stats['numeric_grades'].append(grade_int)

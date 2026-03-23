@@ -5,8 +5,35 @@ from django.db.models import Count
 from application.models import Student, StudentResult, Discipline, Attendance
 
 class SubjectStatisticsService:
+    """
+    Сервис для анализа успеваемости по учебным дисциплинам.
+    
+    Предоставляет методы для:
+    - Определения курса обучения студентов.
+    - Нормализации оценок из строкового формата в числовой/категориальный.
+    - Расчета относительной посещаемости по предметам.
+    - Вычисления интегрального показателя "Активность предмета".
+    - Формирования сводной статистики и рейтинга дисциплин.
+    
+    Основная цель: выявить наиболее успешные и проблемные предметы на основе 
+    комплексного анализа оценок, посещаемости и количества задолженностей.
+    """
     @staticmethod
     def calculate_course(year_of_admission: int) -> int:
+        """
+        Вычисляет текущий курс студента на основе года поступления.
+        
+        Логика:
+        - Учебный год начинается 1 сентября.
+        - Если текущий месяц < 9, курс = текущий год - год поступления.
+        - Если текущий месяц >= 9, курс увеличивается на 1.
+        
+        Args:
+            year_of_admission (int): Год поступления (например, 2023).
+            
+        Returns:
+            int: Номер текущего курса (1, 2, 3, ...).
+        """
         now = datetime.now()
         current_year = now.year
         current_month = now.month
@@ -17,6 +44,18 @@ class SubjectStatisticsService:
 
     @staticmethod
     def extract_year_from_group_name(name: str) -> Optional[int]:
+        """
+        Извлекает год поступления из названия учебной группы.
+        
+        Ожидает формат "Название-ГГ" (например, "КСм-23").
+        Автоматически определяет век (19xx или 20xx) относительно текущего года.
+        
+        Args:
+            name (str): Название группы.
+            
+        Returns:
+            Optional[int]: Полный год поступления или None при ошибке формата.
+        """
         try:
             parts = name.split('-')
             if len(parts) < 2:
@@ -31,6 +70,23 @@ class SubjectStatisticsService:
 
     @staticmethod
     def normalize_grade_value(result_value: str):
+        """
+        Нормализует строковое значение оценки в стандартный формат.
+        
+        Преобразования:
+        - "2", "3", "4", "5" -> int (2, 3, 4, 5)
+        - "Зачтено" -> "зачет"
+        - "Не зачтено" -> "незачет"
+        - "Н/Я" -> "неявка"
+        - Пустые значения -> None
+        - Прочее -> None
+        
+        Args:
+            result_value (str): Исходное значение оценки.
+            
+        Returns:
+            Union[int, str, None]: Нормализованное значение или None.
+        """
         if not result_value:
             return None
         grade_clean = result_value.strip()
@@ -46,7 +102,18 @@ class SubjectStatisticsService:
 
     @classmethod
     def get_students_in_course(cls, course: int) -> List[int]:
-        """Возвращает список student_id студентов на указанном курсе"""
+        """
+        Возвращает список ID студентов, обучающихся на указанном курсе.
+        
+        Фильтрует студентов, не находящихся в академическом отпуске,
+        и вычисляет их курс на основе названия группы.
+        
+        Args:
+            course (int): Номер курса для фильтрации.
+            
+        Returns:
+            List[int]: Список идентификаторов студентов (student_id).
+        """
         student_ids = []
         students = Student.objects.select_related('group').filter(is_academic=False)
         for student in students:
@@ -61,8 +128,22 @@ class SubjectStatisticsService:
     @classmethod
     def get_attendance_percent_for_discipline(cls, discipline_id: int, student_ids: List[int]) -> float:
         """
-        Рассчитывает СРЕДНИЙ процент посещаемости по группе студентов для конкретного предмета.
-        Логика: Для каждого студента считаем (посещения / макс_посещения_в_группе), затем усредняем.
+        Рассчитывает средний процент посещаемости по группе студентов для конкретного предмета.
+        
+        Логика расчета (относительная метрика):
+        1. Для каждого студента считается количество посещений данного предмета.
+        2. Находится максимальное количество посещений среди всех студентов выборки (эталон).
+        3. Для каждого студента вычисляется процент: (посещения / максимум) * 100.
+        4. Возвращается среднее арифметическое этих процентов.
+        
+        Это позволяет оценить вовлеченность группы в предмет без знания общего количества пар.
+        
+        Args:
+            discipline_id (int): ID дисциплины.
+            student_ids (List[int]): Список ID студентов для анализа.
+            
+        Returns:
+            float: Средний процент посещаемости (0.0 - 100.0).
         """
         if not student_ids:
             return 0.0
@@ -100,15 +181,23 @@ class SubjectStatisticsService:
     @classmethod
     def calculate_activity_for_discipline(cls, avg_grade: float, attendance_percent: float, debt_ratio: float) -> float:
         """
-        Рассчитывает активность по предмету (0.0 - 5.0).
+        Рассчитывает интегральный показатель активности по предмету (шкала 0.0 - 5.0).
         
-        Параметры:
-        - avg_grade: средний балл по предмету (0-5)
-        - attendance_percent: средняя посещаемость (0-100)
-        - debt_ratio: доля студентов с долгами (0.0 - 1.0)
+        Формула расчета:
+        Activity = (GradeScore * 0.5) + (AttendanceScore * 0.3) + (DebtFreeBonus * 0.2)
         
-        Формула:
-        (Нормализованный балл * 0.5) + (Нормализованная посещаемость * 0.3) + (Бонус за отсутствие долгов * 0.2)
+        Где:
+        - GradeScore: Средний балл (0-5). Вес 50%.
+        - AttendanceScore: Посещаемость, нормированная к шкале 0-5. Вес 30%.
+        - DebtFreeBonus: Бонус за отсутствие долгов (5.0 * (1 - доля_долгов)). Вес 20%.
+        
+        Args:
+            avg_grade (float): Средний балл по предмету (0-5).
+            attendance_percent (float): Средняя посещаемость в процентах (0-100).
+            debt_ratio (float): Доля студентов с долгами (0.0 - 1.0).
+            
+        Returns:
+            float: Показатель активности (0.0 - 5.0).
         """
         # 1. Компонент успеваемости (шкала 0-5)
         grade_score = avg_grade 
@@ -137,6 +226,47 @@ class SubjectStatisticsService:
         sort_by: str = 'avg',
         limit: int = 5
     ) -> Dict[str, Any]:
+        """
+        Основной метод сервиса. Собирает полную статистику по предметам с фильтрацией.
+        
+        Выполняет следующие шаги:
+        1. Формирует выборку результатов успеваемости (StudentResult) с учетом фильтров.
+        2. Агрегирует данные по дисциплинам: оценки, количество студентов, количество долгов.
+        3. Рассчитывает общую статистику (средний балл, мин/макс, распределение оценок).
+        4. Для каждого предмета вычисляет посещаемость и интегральную активность.
+        5. Формирует рейтинг предметов (топ-N) с возможностью сортировки по разным метрикам.
+        
+        Args:
+            course (int, optional): Фильтр по номеру курса.
+            subject (str, optional): Фильтр по названию предмета (поиск по подстроке).
+            groups (List[str], optional): Фильтр по списку названий групп.
+            sort_by (str): Критерий сортировки ('avg', 'max', 'count', 'activity').
+            limit (int): Количество возвращаемых лучших предметов.
+            
+        Returns:
+            Dict[str, Any]: Структурированные данные:
+                {
+                    "subjectStats": {
+                        "minGrade": float|null,
+                        "avgGrade": float|null,
+                        "maxGrade": float|null
+                    },
+                    "gradeDistributionBar": {
+                        "2": int, "3": int, "4": int, "5": int
+                    },
+                    "bestSubjects": [
+                        {
+                            "subject": str,
+                            "avg": float,
+                            "max": int,
+                            "count": int,
+                            "avgAttendance": float,
+                            "avgActivity": float
+                        },
+                        ...
+                    ]
+                }
+        """
         results_qs = StudentResult.objects.select_related(
             'student__group', 'discipline', 'result'
         ).filter(student__is_academic=False)

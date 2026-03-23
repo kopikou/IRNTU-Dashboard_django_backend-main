@@ -18,11 +18,25 @@ from application.services.student_rating_service import StudentRatingService
 
 class GradesViewset(ListModelMixin, GenericViewSet):
     """
-    ViewSet для получения оценок студентов с агрегированной статистикой.
-    Поддерживает фильтрацию по:
-      - course (int)
-      - group (str)
-      - subject (str)
+    ViewSet для получения агрегированной статистики оценок студентов.
+    
+    Предоставляет сводные данные об успеваемости: средний балл, распределение оценок,
+    минимальные и максимальные значения, а также детализацию по каждому студенту.
+    
+    Использует сервис: GradeStatisticsService
+    
+    Параметры фильтрации (Query Parameters):
+        - course (int, optional): Номер курса (1, 2, 3...).
+        - group (str, optional): Точное название группы (например, "КСм-23").
+        - subject (str, optional): Название предмета (поиск по подстроке).
+        
+    Пример запроса:
+        GET /api/statistics/marks/?course=2&group=ИТПм-22
+        
+    Ответ содержит:
+        - summary: Общая статистика (средний балл, кол-во оценок каждого типа).
+        - students: Список студентов с их оценками по предметам.
+        - subjects: Список предметов.
     """
     queryset = StudentResult.objects.select_related('student', 'discipline', 'result')
     
@@ -45,11 +59,27 @@ class GradesViewset(ListModelMixin, GenericViewSet):
     
 class AcademicPerformanceViewSet(ListModelMixin, GenericViewSet):
     """
-    ViewSet для получения статистики по успеваемости студентов с учётом задолженностей.
+    ViewSet для анализа академической успеваемости с фокусом на задолженности (долги).
     
-    Поддерживает фильтрацию:
-      - group: название группы (точное совпадение)
-      - search: ID студента или часть названия группы
+    Предоставляет данные о количестве долгов у студентов, распределении должников
+    и средней нагрузке по группам. Полезен для кураторов и деканатов.
+    
+    Использует сервис: AcademicPerformanceService
+    
+    Параметры фильтрации (Query Parameters):
+        - group (str, optional): Точное название группы.
+        - search (str, optional): Поисковый запрос. Может быть:
+            - ID студента (число).
+            - Часть названия группы (строка).
+            
+    Пример запроса:
+        GET /api/academic/performance/?search=КСм
+        GET /api/academic/performance/?group=АСУб-21&search=12345
+        
+    Ответ содержит:
+        - debtsDistribution: Гистограмма распределения студентов по кол-ву долгов (0, 1, 2, 3+).
+        - groupAverages: Среднее кол-во долгов на студента в разрезе групп.
+        - students: Список студентов с деталями их долгов.
     """
     queryset = Student.objects.none()
 
@@ -65,14 +95,27 @@ class AcademicPerformanceViewSet(ListModelMixin, GenericViewSet):
 
 class SubjectStatisticsViewSet(ListModelMixin, GenericViewSet):
     """
-    ViewSet для получения статистики по успеваемости по предметам.
+    ViewSet для получения рейтинга и статистики по учебным дисциплинам.
     
-    Поддерживает фильтрацию:
-      - course: номер курса
-      - subject: название предмета (частичное совпадение)
-      - groups: список групп через запятую
-      - sortBy: 'avg', 'max', 'count', 'activity'
-      - limit: количество топ-предметов
+    Анализирует успешность освоения предметов: средний балл, посещаемость,
+    интегральный показатель активности и количество задолженностей.
+    
+    Использует сервис: SubjectStatisticsService
+    
+    Параметры фильтрации (Query Parameters):
+        - course (int, optional): Номер курса.
+        - subject (str, optional): Название предмета (поиск).
+        - groups (str, optional): Список групп через запятую (напр., "КСм-23,ИТПм-23").
+        - sortBy (str, optional): Критерий сортировки ('avg', 'max', 'count', 'activity'). По умолчанию 'avg'.
+        - limit (int, optional): Количество возвращаемых топ-предметов. По умолчанию 5.
+        
+    Пример запроса:
+        GET /api/statistics/subject/?course=3&sortBy=activity&limit=10
+        
+    Ответ содержит:
+        - subjectStats: Общая статистика по выборке.
+        - gradeDistributionBar: Распределение оценок (2,3,4,5).
+        - bestSubjects: Топ предметов с метриками (avg, max, count, avgAttendance, avgActivity).
     """
     queryset = StudentResult.objects.select_related('student', 'discipline', 'result')
 
@@ -102,14 +145,30 @@ class SubjectStatisticsViewSet(ListModelMixin, GenericViewSet):
     
 class StudentRatingViewSet(ListModelMixin, GenericViewSet):
     """
-    ViewSet для получения рейтинга студентов с комплексной оценкой успеваемости.
+    ViewSet для формирования рейтинга студентов на основе комплексной оценки.
     
-    Поддерживает фильтрацию:
-      - course: номер курса
-      - group: название группы (точное совпадение)
-      - subject: название предмета (частичное совпадение)
-      - sortBy: 'rating', 'performance', 'attendance', 'activity'
-      - limit: количество студентов (по умолчанию 10)
+    Рассчитывает индивидуальный рейтинг, учитывая средний балл, относительную посещаемость,
+    активность и риск отчисления. Позволяет выявлять лидеров и студентов группы риска.
+    
+    Использует сервис: StudentRatingService
+    
+    Параметры фильтрации (Query Parameters):
+        - course (int, optional): Номер курса.
+        - group (str, optional): Название группы.
+        - subject (str, optional): Фильтр по предмету (включает студентов, имеющих оценку по этому предмету).
+        - sortBy (str, optional): Критерий сортировки ('rating', 'performance', 'attendance', 'activity'). По умолчанию 'rating'.
+        - limit (int, optional): Количество студентов в выдаче. По умолчанию 10.
+        
+    Пример запроса:
+        GET /api/student-rating/?course=2&sortBy=performance&limit=20
+        
+    Ответ содержит:
+        - chartData: Данные для графиков (имя, avgGrade, activity, attendance).
+        - students: Детальный список студентов с метриками:
+            - avgGrade, activity, attendancePercent
+            - debtCount, debtsDetails
+            - dropoutRisk, riskLevel
+            - rating
     """
     queryset = Student.objects.all().select_related('group')
 
@@ -138,12 +197,34 @@ class StudentRatingViewSet(ListModelMixin, GenericViewSet):
 ##################################################################################    
 class AnalyticsTrainViewSet(viewsets.ViewSet):
     """
-    Запуск пересчета аналитики.
-    Доступно только авторизованным пользователям 
+    ViewSet для запуска процесса кластеризации.
+    
+    Назначение:
+    - Инициирует выполнение Django management команды 'generate_analytics'.
+    - Команда собирает данные из БД, выполняет кластеризацию (KMeans) и сохраняет результат в JSON.
+    
+    Требования:
+    - Доступно только авторизованным пользователям (IsAuthenticated).
+    - Рекомендуется использовать для периодического обновления данных (не для каждого запроса пользователя).
+    
+    Методы:
+        create (POST): Запуск процесса генерации.
     """
     permission_classes = [IsAuthenticated]
 
     def create(self, request):
+        """
+        Запускает management команду для пересчета аналитики.
+        
+        Процесс:
+        1. Вызов call_command('generate_analytics').
+        2. Ожидание завершения скрипта (синхронно).
+        3. Сохранение результатов в файл media/analytics_cache/student_analytics.json.
+        
+        Returns:
+            200 OK: {"message": "Аналитика успешно пересчитана и сохранена."}
+            500 Error: {"error": "Описание ошибки"}
+        """
         # Вызов management команды
         call_command('generate_analytics')
         return Response(
@@ -153,12 +234,40 @@ class AnalyticsTrainViewSet(viewsets.ViewSet):
 
 class AnalyticsDataViewSet(viewsets.ViewSet):
     """
-    Получение готовых данных аналитики.
-    Читает из кэшированного JSON файла, созданного командой.
+    ViewSet для получения готовых результатов кластеризации студентов.
+    
+    Назначение:
+    - Читает предварительно сгенерированный JSON-файл из кэша.
+    - Предоставляет данные для визуализации кластеров и статистики по группам.
+    - Поддерживает фильтрацию по группе и получение данных конкретного студента.
+    
+    Требования:
+    - Доступно только авторизованным пользователям.
+    - Файл должен быть сгенерирован заранее через AnalyticsTrainViewSet.
+    
+    Методы:
+        list (GET): Получение списка всех студентов с кластерами.
+        retrieve (GET): Получение данных одного студента по ID.
     """
     permission_classes = [IsAuthenticated]
     
     def list(self, request):
+        """
+        Возвращает полный список студентов с результатами кластеризации.
+        
+        Query Parameters:
+            - group (str, optional): Фильтр по названию группы.
+            
+        Логика:
+        1. Проверка существования файла кэша.
+        2. Чтение JSON.
+        3. Применение фильтра по группе (если указан).
+        4. Возврат данных.
+        
+        Returns:
+            200 OK: JSON с данными (students, group_stats, total_students, clusters_count).
+            404 Not Found: Если файл еще не сгенерирован.
+        """
         file_name = 'student_analytics.json'
         relative_path = os.path.join('analytics_cache', file_name)
         file_path = os.path.join(settings.MEDIA_ROOT, relative_path)
@@ -187,7 +296,19 @@ class AnalyticsDataViewSet(viewsets.ViewSet):
 
     def retrieve(self, request, pk=None):
         """
-        Получение данных конкретного студента по ID.
+        Возвращает данные конкретного студента по его ID.
+        
+        Args:
+            pk (str|int): ID студента (из URL).
+            
+        Логика:
+        1. Проверка существования файла.
+        2. Чтение JSON.
+        3. Поиск студента в списке по полю 'student_id'.
+        
+        Returns:
+            200 OK: Объект студента.
+            404 Not Found: Если файл не найден или студент не найден в данных.
         """
         file_name = 'student_analytics.json'
         relative_path = os.path.join('analytics_cache', file_name)
