@@ -29,3 +29,5 @@ pytest==8.4.2
 pytest-django==4.11.1
 
 model-bakery==1.23.2
+
+torch==2.11.0

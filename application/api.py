@@ -326,6 +326,168 @@ class AnalyticsDataViewSet(viewsets.ViewSet):
             return Response({"error": "Student not found"}, status=404)
             
         return Response(student)
+    
+class GradePredictionTrainViewSet(viewsets.ViewSet):
+    """
+    ViewSet для запуска процесса обучения нейросетевой модели прогнозирования оценок (PyTorch).
+    
+    Назначение:
+    - Предоставляет API эндпоинт для инициирования пайплайна машинного обучения.
+    - Принимает параметры фильтрации (факультет, группа, курс) для выбора целевой выборки.
+    - Вызывает Django management команду `generate_grade_predictions`, которая выполняет:
+        1. Сбор данных из БД (оценки, посещаемость).
+        2. Подготовку признаков (нормализация, расчет относительной посещаемости).
+        3. Обучение модели GradeRegressor на данных старших курсов.
+        4. Генерацию прогнозов для студентов указанного курса.
+        5. Сохранение результатов в JSON.
+    
+    Требования:
+    - Пользователь должен быть аутентифицирован (IsAuthenticated).
+    - Наличие данных в БД для указанных параметров.
+    - Установленные библиотеки PyTorch, Pandas, Scikit-learn.
+    
+    Методы:
+        create (POST): Запуск процесса обучения и генерации прогнозов.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def create(self, request):
+        """
+        Обрабатывает POST-запрос для запуска обучения модели.
+        
+        Параметры передаются в теле запроса (JSON Body):
+            - faculty (str): Полное название факультета (обязательно).
+            - group_base (str): Базовая часть названия группы без года (обязательно, напр. "ИСТб").
+            - course (int): Номер курса для прогнозирования (1, 2 или 3) (обязательно).
+        
+        Логика работы:
+        1. Валидация наличия всех обязательных параметров.
+        2. Преобразование параметра `course` в целое число.
+        3. Синхронный вызов management команды `generate_grade_predictions`.
+        4. Возврат статуса выполнения.
+        
+        Returns:
+            Response (200 OK): {"message": "Прогнозирование для {group} (курс {course}) запущено и завершено."}
+            Response (400 Bad Request): {"error": "Необходимы параметры: faculty, group_base, course"}
+            Response (500 Internal Server Error): {"error": "Описание ошибки исполнения"}
+            
+        Пример запроса (JSON):
+            {
+                "faculty": "Институт информационных технологий и анализа данных",
+                "group_base": "ИСТб",
+                "course": 2
+            }
+        """
+        faculty = request.data.get('faculty')
+        group_base = request.data.get('group_base')
+        course = request.data.get('course')
+        # faculty = request.query_params.get('faculty')
+        # group_base = request.query_params.get('group_base')
+        # course = request.query_params.get('course')
+
+        if not all([faculty, group_base, course]):
+            return Response(
+                {"error": "Необходимы параметры: faculty, group_base, course"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        course = int(course)
+        call_command('generate_grade_predictions', 
+                        faculty=faculty, 
+                        group_base=group_base, 
+                        course=course)
+        
+        return Response(
+            {"message": f"Прогнозирование для {group_base} (курс {course}) запущено и завершено."},
+            status=status.HTTP_200_OK
+        )
+
+class GradePredictionDataViewSet(viewsets.ViewSet):
+    """
+    ViewSet для получения результатов прогнозирования оценок.
+    
+    Назначение:
+    - Предоставляет доступ к ранее сгенерированным прогнозам модели.
+    - Читает данные из файлов, созданных командой `generate_grade_predictions`.
+    - Поддерживает фильтрацию результатов по конкретному студенту.
+    
+    Требования:
+    - Пользователь должен быть аутентифицирован.
+    - Файл с прогнозами должен быть предварительно сгенерирован через `GradePredictionTrainViewSet`.
+    - Путь к файлу формируется динамически на основе параметров запроса.
+    
+    Методы:
+        list (GET): Получение списка прогнозов для группы/курса или конкретного студента.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        """
+        Обрабатывает GET-запрос для получения данных прогнозов.
+        
+        Параметры передаются в строке запроса :
+            - faculty (str): Название факультета (обязательно).
+            - group_base (str): База названия группы (обязательно).
+            - course (int): Номер курса (обязательно).
+            - student_id (str, optional): ID конкретного студента для фильтрации результата.
+        
+        Логика работы:
+        1. Валидация обязательных параметров.
+        2. Формирование имени файла: `predictions_{faculty}_{group_base}_course{course}.json`.
+        3. Проверка существования файла в директории `MEDIA_ROOT/prediction_cache/`.
+        4. Чтение и десериализация JSON.
+        5. Опциональная фильтрация списка по `student_id`.
+        6. Возврат структурированного ответа.
+        
+        Returns:
+            Response (200 OK): {
+                "faculty": "...",
+                "group_base": "...",
+                "course": ...,
+                "predictions": [ {...}, {...} ]
+            }
+            Response (400 Bad Request): При отсутствии обязательных параметров.
+            Response (404 Not Found): Если файл с прогнозами еще не сгенерирован.
+            Response (500 Internal Server Error): При ошибке чтения файла.
+            
+        Пример запроса:
+            GET /api/predictions/data/?faculty=Институт...&group_base=ИСТб&course=2
+            GET /api/predictions/data/?faculty=...&group_base=ИСТб&course=2&student_id=12345
+        """
+        faculty = request.query_params.get('faculty')
+        group_base = request.query_params.get('group_base')
+        course = request.query_params.get('course')
+
+        if not all([faculty, group_base, course]):
+            return Response(
+                {"error": "Необходимы параметры: faculty, group_base, course"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        filename = f"predictions_{faculty.replace(' ', '_')}_{group_base}_course{course}.json"
+        filepath = os.path.join(settings.MEDIA_ROOT, 'prediction_cache', filename)
+
+        if not os.path.exists(filepath):
+            return Response(
+                {"error": "Прогноз еще не сгенерирован. Запустите обучение модели."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Опциональная фильтрация по студенту
+        student_id = request.query_params.get('student_id')
+        if student_id:
+            data = [s for s in data if str(s.get('mira_id')) == str(student_id)]
+
+        return Response({
+            "faculty": faculty,
+            "group_base": group_base,
+            "course": course,
+            "predictions": data
+        }, status=status.HTTP_200_OK)
+
 
 
 # class TrainModelViewSet(viewsets.ViewSet):

@@ -24,7 +24,7 @@ from application.views import (
     StudentViewSet, DisciplineViewSet, ResultTypeViewSet,
     StudentResultViewSet, AttendanceViewSet
 )
-from application.api import GradesViewset, SubjectStatisticsViewSet, AcademicPerformanceViewSet, AcademicReturnsViewSet, StudentRatingViewSet, AnalyticsTrainViewSet, AnalyticsDataViewSet #TrainModelViewSet, StudentAnalyticsViewSet
+from application.api import GradesViewset, SubjectStatisticsViewSet, AcademicPerformanceViewSet, StudentRatingViewSet, AnalyticsTrainViewSet, AnalyticsDataViewSet, GradePredictionTrainViewSet, GradePredictionDataViewSet
 
 router = DefaultRouter()
 router.register(r'faculties', FacultyViewSet, basename='faculty')
@@ -45,6 +45,8 @@ router.register("student-rating", StudentRatingViewSet, basename="api-rating")
 #router.register("student-analytics", StudentAnalyticsViewSet, basename="get_analytics")
 router.register(r'analytics/train', AnalyticsTrainViewSet, basename='analytics-train')
 router.register(r'analytics/data', AnalyticsDataViewSet, basename='analytics-data')
+router.register(r'predictions/train', GradePredictionTrainViewSet, basename='predictions-train')
+router.register(r'predictions/data', GradePredictionDataViewSet, basename='predictions-data')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
