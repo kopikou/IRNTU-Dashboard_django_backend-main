@@ -29,7 +29,7 @@ from application.api import GradesViewset, SubjectStatisticsViewSet, AcademicPer
 router = DefaultRouter()
 router.register(r'faculties', FacultyViewSet, basename='faculty')
 router.register(r'specialities', SpecialityViewSet, basename='speciality')
-router.register(r'student-groups', StudentGroupViewSet, basename='student-group')
+router.register(r'groups', StudentGroupViewSet, basename='group')
 router.register(r'students', StudentViewSet, basename='student')
 router.register(r'disciplines', DisciplineViewSet, basename='discipline')
 router.register(r'result-types', ResultTypeViewSet, basename='result-type')
