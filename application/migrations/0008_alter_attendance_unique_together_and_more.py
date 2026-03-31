@@ -11,10 +11,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterUniqueTogether(
-            name='attendance',
-            unique_together={('lesson_id', 'student')},
-        ),
         migrations.RemoveField(
             model_name='student',
             name='birth_date',
@@ -125,6 +121,10 @@ class Migration(migrations.Migration):
         migrations.AlterUniqueTogether(
             name='studentresult',
             unique_together={('student', 'discipline')},
+        ),
+        migrations.AlterUniqueTogether(
+            name='attendance',
+            unique_together={('lesson_id', 'student')},
         ),
         migrations.RemoveField(
             model_name='attendance',
